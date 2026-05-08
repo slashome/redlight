@@ -1,0 +1,35 @@
+[package]
+name = "redlight"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+description = "Daemon de synchronisation USB multi-périphériques (macOS + Linux)."
+license = "MIT"
+authors = ["slashome"]
+repository = "https://github.com/slashome/redlight"
+readme = "README.md"
+keywords = ["sync", "usb", "mtp", "android", "daemon"]
+categories = ["command-line-utilities", "filesystem"]
+
+[[bin]]
+name = "rl"
+path = "src/main.rs"
+
+[lib]
+name = "redlight"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+anyhow = "1.0"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
