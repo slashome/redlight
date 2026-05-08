@@ -1,0 +1,16 @@
+[[binding]]
+item = "music"
+device = "tardis"
+path = "~/Music"
+role = "read_write"
+
+[[binding]]
+item = "music"
+device = "jarvis"
+path = "/storage/emulated/0/Music"
+role = "read_only"
+
+[[binding]]
+item = "music"
+device = "materia"
+role = "read_write"

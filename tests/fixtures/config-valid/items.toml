@@ -1,0 +1,9 @@
+[music]
+kind = "folder"
+category = "audio"
+include = ["**/*.mp3", "**/*.flac"]
+exclude = ["**/draft-*"]
+
+[contrat-freelance]
+kind = "file"
+category = "admin"

@@ -1,0 +1,15 @@
+[tardis]
+type = "host"
+bridge = "fs"
+
+[jarvis]
+type = "phone"
+bridge = "mtp"
+match.vendor_id = "18d1"
+match.product_id = "4ee7"
+match.serial = "ABC123"
+
+[materia]
+type = "drive"
+bridge = "fs"
+match.volume_label = "MATERIA"
