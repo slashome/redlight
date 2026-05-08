@@ -35,7 +35,7 @@ The active device propagates state by participating in many pairings, but holds 
 
 ### Bridges
 
-Pluggable per-device interface. Common ABC: `list_files`, `get_file`, `put_file`, `delete_file`, `make_dir`, `get_metadata`.
+Pluggable per-device interface (Rust trait): `list_files`, `get_file`, `put_file`, `delete_file`, `make_dir`, `get_metadata`.
 
 | Bridge | Used for |
 |--------|----------|
@@ -47,7 +47,7 @@ Bridge per device is declared in `devices.toml`. Default for Android = `mtp`.
 
 ### Files layout
 
-On **Tardis** (active host, Mac/Linux):
+On **Tardis** (active host, macOS / Linux):
 ```
 ~/.config/redlight/
   ├── devices.toml          # known devices
@@ -57,7 +57,8 @@ On **Tardis** (active host, Mac/Linux):
 ~/.local/state/redlight/
   ├── sync_log.toml
   └── daemon.log
-~/Library/LaunchAgents/com.redlight.daemon.plist   (macOS)
+~/Library/LaunchAgents/com.redlight.daemon.plist          # macOS
+~/.config/systemd/user/redlight.service                   # Linux
 ```
 
 On **Jarvis** (Android, passive):
@@ -152,45 +153,55 @@ last_sync = 1715000100
 - [ ] Project structure
   ```
   redlight/
-    ├── rl/
-    │   ├── __init__.py
-    │   ├── cli.py
-    │   ├── daemon.py
-    │   ├── config.py
-    │   ├── manifest.py
-    │   ├── sync_engine.py
+    ├── src/
+    │   ├── main.rs              # binary entry (calls cli)
+    │   ├── lib.rs               # library root, re-exports
+    │   ├── cli/
+    │   │   └── mod.rs           # clap definitions, dispatch
+    │   ├── config.rs            # devices/items/bindings TOML loading
+    │   ├── manifest.rs          # per-device manifest TOML
+    │   ├── sync/
+    │   │   └── mod.rs           # sync engine (diff, reconcile, transfer)
     │   ├── bridges/
-    │   │   ├── __init__.py
-    │   │   ├── base.py
-    │   │   ├── fs.py
-    │   │   ├── mtp.py
-    │   │   └── adb.py
-    │   ├── usb_watcher.py
-    │   ├── volume_watcher.py
-    │   ├── menu_bar.py
-    │   └── logger.py
+    │   │   ├── mod.rs           # Bridge trait
+    │   │   ├── fs.rs
+    │   │   ├── mtp.rs
+    │   │   └── adb.rs
+    │   ├── watcher/
+    │   │   ├── mod.rs           # Watcher trait + event types
+    │   │   ├── macos.rs         # IOKit + DiskArbitration
+    │   │   └── linux.rs         # udev
+    │   ├── daemon.rs            # daemon main loop
+    │   ├── ipc.rs               # Unix socket protocol
+    │   └── tray.rs              # tray-icon menu
     ├── tests/
+    │   └── smoke.rs             # integration tests
     ├── resources/
-    │   └── com.redlight.daemon.plist
+    │   ├── com.redlight.daemon.plist   # macOS launchd
+    │   └── redlight.service            # Linux systemd user
     ├── README.md
     ├── PLAN.md
-    ├── pyproject.toml
+    ├── Cargo.toml
+    ├── Cargo.lock                # committed (binary crate)
     └── .gitignore
   ```
-- [ ] `pyproject.toml`: click, rumps, pyobjc-framework-IOKit, pyobjc-framework-DiskArbitration, tomli, tomli-w
-- [ ] Python 3.11+ virtualenv
-- [ ] Homebrew prereqs documented: `libmtp`
-- [ ] `.gitignore` (venv, `__pycache__`, `.DS_Store`, dist, build)
-- [ ] Pre-commit: black, ruff, mypy
-- [ ] CI minimale: GitHub Actions lint + tests
+- [ ] `Cargo.toml`: clap, serde, toml, tokio, anyhow, thiserror, tracing, walkdir, ignore, md-5, notify
+- [ ] Platform-conditional deps via `[target.'cfg(target_os = "...")'.dependencies]`:
+  - macOS → `io-kit-sys`, `core-foundation`, `objc2`
+  - Linux → `udev`
+  - cross → `tray-icon`
+- [ ] Rust 1.80+ toolchain, edition 2024
+- [ ] System prereqs documented: `libmtp` (macOS via brew, Linux via apt/dnf), `libudev-dev` for Linux
+- [ ] `.gitignore` (`/target`, `*.local.toml`, `.DS_Store`)
+- [ ] CI minimale: GitHub Actions matrix `[ubuntu-latest, macos-latest]` → `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`
 
 ---
 
 ## Phase 1 — Core data model
 
 ### 1.1 Config loading
-- [ ] `Device`, `Item`, `Binding` dataclasses
-- [ ] Parse `devices.toml`, `items.toml`, `bindings.toml`
+- [ ] `Device`, `Item`, `Binding` structs with `serde::Deserialize`
+- [ ] Parse `devices.toml`, `items.toml`, `bindings.toml` via `toml` crate
 - [ ] Schema validation: device types, bridge names, item kinds, role values, glob syntax
 - [ ] Cross-validation: every binding references a known device + item
 - [ ] Path normalization with defaults:
@@ -198,11 +209,11 @@ last_sync = 1715000100
   - drive devices → device root if no path
   - phone devices → `/storage/emulated/0/` if no path
 - [ ] `~` expansion, absolute path resolution
-- [ ] Hot reload (file watch)
+- [ ] Hot reload via `notify` crate watching `~/.config/redlight/`
 
 ### 1.2 Manifest
-- [ ] `Manifest` class: `load`, `save`, `get_entry`, `update_entry`, `remove_entry`
-- [ ] Atomic writes (temp + rename)
+- [ ] `Manifest` struct: `load`, `save`, `get_entry`, `update_entry`, `remove_entry`
+- [ ] Atomic writes (write to temp + `fs::rename`)
 - [ ] Format versioning (`version` field, migration path)
 - [ ] One manifest per device, lives on the device itself
 
@@ -216,33 +227,35 @@ last_sync = 1715000100
 
 ## Phase 2 — Bridges
 
-### 2.1 Bridge ABC (`bridges/base.py`)
-- [ ] `list_files(path) → [FileMeta]` (recursive, with mtime + size)
+### 2.1 Bridge trait (`src/bridges/mod.rs`)
+- [ ] `trait Bridge` with async methods (`#[async_trait]` or native async fn in trait)
+- [ ] `list_files(path) -> Vec<FileMeta>` (recursive, with mtime + size)
 - [ ] `get_file(remote_path, local_dest)`
 - [ ] `put_file(local_src, remote_path)`
 - [ ] `delete_file(path)`
 - [ ] `make_dir(path)`
-- [ ] `get_metadata(path) → FileMeta`
+- [ ] `get_metadata(path) -> FileMeta`
 - [ ] `read_text(path)` / `write_text(path, content)` for manifest bootstrap
-- [ ] Context manager: `with bridge.connect(): ...`
+- [ ] Lifecycle: `connect() -> ConnectedBridge` (RAII guard), drop = disconnect
 
 ### 2.2 `FsBridge`
-- [ ] Pure POSIX: `os`, `pathlib`, `shutil`
+- [ ] `std::fs` + `walkdir` + `tokio::fs` for async I/O
 - [ ] Used for host + mounted drives (`/Volumes/*`, `/media/*`, `/mnt/*`)
-- [ ] No special connect/disconnect logic
+- [ ] No connect/disconnect logic, always available
 
 ### 2.3 `MtpBridge`
-- [ ] Subprocess wrapping libmtp tools (`mtp-detect`, `mtp-files`, `mtp-getfile`, `mtp-sendfile`, `mtp-delfile`)
+- [ ] `tokio::process::Command` wrapping libmtp tools (`mtp-detect`, `mtp-files`, `mtp-getfile`, `mtp-sendfile`, `mtp-delfile`)
 - [ ] Parse output reliably (consider piping through `--quiet` and structured flags)
 - [ ] Error mapping: device disconnected, locked file, no space
 - [ ] Alternative path: bind to a FUSE mount (`jmtpfs`, `go-mtpfs`) and reuse `FsBridge` semantics — evaluate which is more reliable
+- [ ] Future option: link `libmtp-sys` directly via FFI (skip subprocess overhead)
 
 ### 2.4 `AdbBridge` (optional, override)
 - [ ] Wrap `adb push`, `adb pull`, `adb shell ls`, `adb shell stat`
 - [ ] Faster than MTP, but requires USB debugging enabled
 
 ### 2.5 Bridge registry
-- [ ] Lookup by name from `devices.toml`
+- [ ] Enum dispatch (`enum Bridges { Fs(FsBridge), Mtp(MtpBridge), Adb(AdbBridge) }`) selected from `devices.toml`
 - [ ] Health check before sync
 - [ ] Clear error when prerequisite missing (libmtp absent, adb not in PATH)
 
@@ -298,47 +311,55 @@ last_sync = 1715000100
 
 ## Phase 4 — Detection & daemon
 
-### 4.1 USB watcher (phones)
-- [ ] `pyobjc-framework-IOKit` listens on `IOServiceMatching("IOUSBDevice")`
-- [ ] Plug callback: identify by vendor/product/serial, match against `devices.toml`
-- [ ] Unplug callback: tear down bridge cleanly
-- [ ] Filter non-storage USB events (keyboards, dongles)
+### 4.1 Watcher abstraction
+- [ ] `trait Watcher`: emits `DeviceConnected { id, kind }` / `DeviceDisconnected { id }` events on a `tokio::sync::mpsc` channel
+- [ ] Pluggable backends per platform, selected at compile time via `cfg`
+- [ ] Filter non-storage devices (keyboards, dongles) by vendor class
 
-### 4.2 Volume watcher (drives)
-- [ ] `pyobjc-framework-DiskArbitration` for mount/unmount
-- [ ] Match volume label or UUID against `devices.toml`
-- [ ] Mount callback → start sync; unmount callback → finalize cleanly
+### 4.2 macOS backend (`watcher/macos.rs`)
+- [ ] `io-kit-sys` + `core-foundation` for USB phones (`IOServiceMatching("IOUSBDevice")`)
+- [ ] `disk_arbitration_sys` (or hand-rolled FFI) for volume mount/unmount
+- [ ] Identify by vendor/product/serial or volume label/UUID
+- [ ] Run-loop integration with tokio (likely a dedicated thread bridging CFRunLoop → mpsc)
 
-### 4.3 Daemon main loop
-- [ ] Background process, single instance (lockfile)
+### 4.3 Linux backend (`watcher/linux.rs`)
+- [ ] `udev` crate `MonitorBuilder` on subsystem `usb` (phones) and `block` (drives)
+- [ ] Match by `ID_VENDOR_ID`, `ID_MODEL_ID`, `ID_SERIAL_SHORT` for phones
+- [ ] Match by `ID_FS_LABEL` or `ID_FS_UUID` for drives
+- [ ] Trigger mount of drives via `udisksctl` if needed
+
+### 4.4 Daemon main loop
+- [ ] Background process, single instance (lockfile in `~/.local/state/redlight/redlight.pid`)
 - [ ] Signal handling: SIGTERM finishes current sync, then exits
 - [ ] Queue: serialize syncs across devices (no parallel)
 - [ ] Per-sync timeout (30 min default), abort + log
 
-### 4.4 launchd integration (macOS)
+### 4.5 launchd integration (macOS)
 - [ ] `com.redlight.daemon.plist` in `~/Library/LaunchAgents/`
 - [ ] `RunAtLoad = true`, `KeepAlive = true`
 - [ ] stdout/stderr → `~/.local/state/redlight/daemon.log`
 - [ ] `rl start` → `launchctl load`, `rl stop` → `launchctl unload`
 
-### 4.5 IPC
-- [ ] Unix socket at `/tmp/redlight.sock`
+### 4.6 systemd user integration (Linux)
+- [ ] `redlight.service` in `~/.config/systemd/user/`
+- [ ] `Restart=on-failure`, `Type=simple`, journal logging
+- [ ] `rl start` → `systemctl --user start redlight`, `rl stop` → analog
+- [ ] `rl init` enables on login (`systemctl --user enable`)
+
+### 4.7 IPC
+- [ ] Unix socket at `$XDG_RUNTIME_DIR/redlight.sock` (Linux) / `/tmp/redlight.sock` (macOS)
 - [ ] JSON line protocol
 - [ ] Commands: `status`, `sync_now`, `reload_config`, `shutdown`
-
-### 4.6 Linux daemon (later)
-- [ ] systemd user service equivalent of launchd
-- [ ] udev rules for plug detection
-- [ ] Out of scope v1, planned v2
 
 ---
 
 ## Phase 5 — CLI `rl`
 
 ### 5.1 Framework
-- [ ] `click` groups: `device`, `item`, `bind`, plus top-level (`init`, `start`, `stop`, `status`, `sync`, `log`, `manifest`)
-- [ ] Entry point in `pyproject.toml`
-- [ ] Contextual help everywhere
+- [ ] `clap` derive API: top-level enum + nested subcommand enums for `device`, `item`, `bind`
+- [ ] Top-level: `init`, `start`, `stop`, `status`, `sync`, `log`, `manifest`
+- [ ] Binary declared in `Cargo.toml` (`[[bin]] name = "rl"`)
+- [ ] Contextual help everywhere (clap auto-generated)
 
 ### 5.2 Commands
 - [ ] `rl init` — create config skeleton, install launchd plist, check libmtp, start daemon
@@ -353,10 +374,10 @@ last_sync = 1715000100
 
 ---
 
-## Phase 6 — Menu bar (macOS)
+## Phase 6 — Menu bar / tray (macOS + Linux)
 
 ### 6.1 Icon + states
-- [ ] rumps-based menu bar app
+- [ ] `tray-icon` crate (cross-platform: NSStatusItem on macOS, AppIndicator/SNI on Linux)
 - [ ] States: idle (grey), syncing (animated), error (red), recent success (green flash)
 
 ### 6.2 Dropdown
@@ -393,28 +414,29 @@ Quit
 
 ## Phase 7 — Packaging & distribution
 
-- [ ] py2app build, bundles libmtp where possible
-- [ ] `.icns` icon
-- [ ] `create-dmg` for distribution
-- [ ] Post-install: `brew install libmtp` if absent, then `rl init`
-- [ ] Signing (Apple Developer ID — optional)
+- [ ] macOS: `cargo bundle --release` → `.app`; `create-dmg` for `.dmg`; signing (Apple Developer ID, optional)
+- [ ] Linux: `cargo deb` for Debian/Ubuntu, `cargo generate-rpm` for Fedora; AUR PKGBUILD
+- [ ] Homebrew formula (`slashome/homebrew-tap` puis migration vers core)
+- [ ] Installateur `redlight.sh` hébergé sur `slashome.me/apps/`: détecte l'OS, télécharge le binaire de la dernière release GitHub, installe `libmtp` via le gestionnaire de paquets local
+- [ ] `.icns` / `.png` icon
 - [ ] Update check via GitHub releases API
 
 ---
 
 ## Phase 8 — Tests & robustness
 
-### 8.1 Unit
-- [ ] `test_config.py` — parse valid/invalid TOML, cross-references, defaults
-- [ ] `test_manifest.py` — load/save, atomic write, version migration
-- [ ] `test_bridges_fs.py` — full coverage with tmpdir
-- [ ] `test_bridges_mtp.py` — mocked subprocess
-- [ ] `test_sync_engine.py` — diff, conflicts, role enforcement, include/exclude
+### 8.1 Unit (in-module `#[cfg(test)] mod tests`)
+- [ ] `config` — parse valid/invalid TOML, cross-references, defaults
+- [ ] `manifest` — load/save, atomic write, version migration
+- [ ] `bridges::fs` — full coverage with `tempfile::TempDir`
+- [ ] `bridges::mtp` — mocked process via trait abstraction
+- [ ] `sync` — diff, conflicts, role enforcement, include/exclude
 
-### 8.2 Integration
-- [ ] FS-only synthetic devices (two tmpdirs simulating two devices) → end-to-end sync
+### 8.2 Integration (`tests/*.rs`)
+- [ ] FS-only synthetic devices (two tempdirs simulating two devices) → end-to-end sync
 - [ ] Disconnect mid-sync simulation
 - [ ] Insufficient space simulation
+- [ ] CLI smoke via `assert_cmd`
 
 ### 8.3 Validated edge cases
 - [ ] 0-byte file
@@ -431,8 +453,7 @@ Quit
 ## Out of scope (v1)
 
 - Encryption (planned v2)
-- Windows support (planned v2)
-- Linux daemon (planned v2 — systemd + udev)
+- Windows support (planned v2 — service + WMI/SetupDi)
 - Wi-Fi / cloud sync (never)
 - Conflict resolution beyond "most recent wins" (v2: keep both, prompt user)
 - Direct active+active USB transfer (works via SSD courier in v1)
@@ -444,9 +465,10 @@ Quit
 
 | Phase | Test |
 |-------|------|
-| 1 | `python -c "from rl.config import load; print(load())"` |
-| 2 | `python -c "from rl.bridges.fs import FsBridge; print(FsBridge('/tmp').list_files('.'))"` |
-| 3 | `rl sync --dry-run` on two FS devices |
+| 0 | `cargo build && cargo run -- --help` |
+| 1 | `cargo test --lib config::` |
+| 2 | `cargo test --lib bridges::fs::` |
+| 3 | `cargo run -- sync --dry-run` on two FS devices |
 | 4 | Plug Jarvis or Materia, check daemon log |
 | 5 | `rl device list`, `rl bind list`, `rl status` |
-| 6 | Launch app, check menu bar icon |
+| 6 | Launch daemon, check tray icon |

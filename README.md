@@ -2,7 +2,7 @@
 
 > `rl` — synchronise tes appareils par USB, sans cloud, sans app, sans friction.
 
-Redlight est un daemon macOS qui synchronise automatiquement des fichiers et dossiers entre plusieurs périphériques (ordi, téléphone, disque externe) au moment de leur branchement. Aucune app à installer sur les périphériques passifs, aucun cloud, tout passe par USB.
+Redlight est un programme cross-platform (macOS + Linux en v1, Windows en v2) qui synchronise automatiquement des fichiers et dossiers entre plusieurs périphériques (ordi, téléphone, disque externe) au moment de leur branchement. Aucune app à installer sur les périphériques passifs, aucun cloud, tout passe par USB.
 
 ---
 
@@ -40,7 +40,7 @@ Un sync existe entre deux devices pour un item ssi les deux ont un binding sur c
 
 À chaque branchement d'un device connu :
 
-1. Le daemon détecte (IOKit pour les phones USB, DiskArbitration pour les drives)
+1. Le daemon détecte (IOKit + DiskArbitration sur macOS, udev sur Linux)
 2. Il identifie le device via son ID matériel ou son label de volume
 3. Il charge la config (`devices.toml`, `items.toml`, `bindings.toml`)
 4. Pour chaque item bindé sur ce device et sur un autre device présent : diff manifeste vs état réel
@@ -135,29 +135,33 @@ Chemins par défaut si `path` absent : `$HOME` sur host, racine du device sur di
 
 ## Installation
 
+> ⚠️ Aucun canal de distribution n'est encore actif. Tout ce qui suit est l'objectif cible.
+
+### macOS
+
 ```bash
-# Prérequis
-brew install libmtp
+brew install redlight                                      # à venir
+# ou
+curl -fsSL https://slashome.me/apps/redlight.sh | sh       # à venir
+```
 
-# Installer redlight
-pip install redlight
+### Linux
 
-# Initialiser
-rl init
+```bash
+curl -fsSL https://slashome.me/apps/redlight.sh | sh       # à venir
+# .deb / .rpm / AUR : voir la page Releases GitHub          # à venir
+```
 
-# Démarrer le daemon (au login automatiquement via launchd)
-rl start
+L'installateur téléchargera un binaire pré-compilé et installera automatiquement les dépendances système nécessaires (dont `libmtp`) via le gestionnaire de paquets de l'OS.
 
-# Ajouter un device
-rl device add jarvis --type phone --bridge mtp
+### Première utilisation
 
-# Ajouter un item
-rl item add music --kind folder --include "**/*.mp3"
-
-# Lier item × device
+```bash
+rl init                                                          # crée la config, enregistre le service système
+rl start                                                         # démarre le daemon (auto au login ensuite)
+rl device add jarvis --type phone --bridge mtp                   # déclarer un device
+rl item add music --kind folder --include "**/*.mp3"             # déclarer un item
 rl bind add --item music --device tardis --path ~/Music --role read_write
-
-# Voir le statut
 rl status
 ```
 
@@ -167,7 +171,7 @@ rl status
 
 | commande | description |
 |----------|-------------|
-| `rl init` | initialise la config et enregistre le launchd agent |
+| `rl init` | initialise la config et enregistre l'agent (launchd / systemd user) |
 | `rl start` / `rl stop` / `rl restart` | contrôle du daemon |
 | `rl status` | état du daemon, devices connectés, dernière sync par binding |
 | `rl device add\|remove\|list` | gestion des devices |
@@ -183,18 +187,20 @@ rl status
 
 | composant | technologie |
 |-----------|------------|
-| Langage | Python 3.11+ |
-| Daemon macOS | `launchd` via `.plist` |
-| Détection USB (phones) | `pyobjc-framework-IOKit` |
-| Détection volumes (drives) | `pyobjc-framework-DiskArbitration` |
-| Bridge MTP | `libmtp` (Homebrew) + subprocess |
+| Langage | Rust (édition 2024) |
+| Daemon | `launchd` (macOS) / `systemd --user` (Linux) / Service Windows (v2) |
+| CLI | `clap` |
+| Config & manifeste | `serde` + `toml` |
+| Détection USB & volumes | `io-kit-sys` + `core-foundation` (macOS) / `udev` (Linux) |
+| Bridge MTP | `libmtp` + subprocess |
 | Bridge ADB | `adb` (optionnel) |
-| Bridge FS | stdlib |
-| Menu bar | `rumps` |
-| Config | TOML (`tomllib` stdlib + `tomli-w`) |
-| Manifeste | TOML par device |
-| CLI | `click` |
-| Packaging | `py2app` |
+| Bridge FS | stdlib + `walkdir` |
+| Menu bar / tray | `tray-icon` (cross-platform) |
+| Async runtime | `tokio` |
+| Logs | `tracing` + `tracing-subscriber` |
+| Filtres glob | `ignore` |
+| Hashing | `md-5` |
+| Packaging | `cargo-bundle` (macOS) / `cargo-deb` (Linux) / `cargo-wix` (Windows v2) |
 
 ---
 
@@ -205,8 +211,28 @@ rl status
 - Pas d'app sur les périphériques passifs
 - Pas de chiffrement (prévu v2)
 - Pas de support Windows (prévu v2)
-- Pas de daemon Linux (prévu v2)
 - Pas de gestion fine des conflits (le plus récent gagne)
+
+---
+
+## Contribuer
+
+```bash
+# Toolchain Rust
+brew install rust                                                       # macOS
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh          # Linux/macOS via rustup
+
+# Headers de dev
+brew install libmtp                                                     # macOS
+sudo apt install libmtp-dev libudev-dev pkg-config                      # Debian/Ubuntu
+sudo dnf install libmtp-devel systemd-devel pkg-config                  # Fedora
+
+# Build & tests
+git clone https://github.com/slashome/redlight && cd redlight
+cargo build
+cargo test
+cargo run -- --help
+```
 
 ---
 
