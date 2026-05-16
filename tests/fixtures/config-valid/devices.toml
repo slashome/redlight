@@ -1,10 +1,12 @@
 [tardis]
 type = "host"
 bridge = "fs"
+description = "MacBook Pro M2 Max 64GB"
 
 [jarvis]
 type = "phone"
 bridge = "mtp"
+description = "Fairphone 6"
 match.vendor_id = "18d1"
 match.product_id = "4ee7"
 match.serial = "ABC123"
@@ -12,4 +14,5 @@ match.serial = "ABC123"
 [materia]
 type = "drive"
 bridge = "fs"
+description = "SSD Playstation"
 match.volume_label = "MATERIA"

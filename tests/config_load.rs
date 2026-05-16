@@ -12,15 +12,21 @@ fn loads_valid_fixture() {
     let tardis = &cfg.devices["tardis"];
     assert_eq!(tardis.device_type, DeviceType::Host);
     assert_eq!(tardis.bridge, Bridge::Fs);
+    assert_eq!(
+        tardis.description.as_deref(),
+        Some("MacBook Pro M2 Max 64GB")
+    );
 
     let jarvis = &cfg.devices["jarvis"];
     assert_eq!(jarvis.device_type, DeviceType::Phone);
     assert_eq!(jarvis.bridge, Bridge::Mtp);
+    assert_eq!(jarvis.description.as_deref(), Some("Fairphone 6"));
     assert_eq!(jarvis.matcher.vendor_id.as_deref(), Some("18d1"));
     assert_eq!(jarvis.matcher.serial.as_deref(), Some("ABC123"));
 
     let materia = &cfg.devices["materia"];
     assert_eq!(materia.device_type, DeviceType::Drive);
+    assert_eq!(materia.description.as_deref(), Some("SSD Playstation"));
     assert_eq!(materia.matcher.volume_label.as_deref(), Some("MATERIA"));
 
     assert_eq!(cfg.items.len(), 2);

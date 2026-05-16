@@ -53,6 +53,8 @@ struct DeviceRaw {
     bridge: Bridge,
     #[serde(default, rename = "match")]
     matcher: DeviceMatch,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +63,7 @@ pub struct Device {
     pub device_type: DeviceType,
     pub bridge: Bridge,
     pub matcher: DeviceMatch,
+    pub description: Option<String>,
 }
 
 // ============================================================================
@@ -179,6 +182,7 @@ fn load_devices(path: &Path) -> Result<HashMap<String, Device>> {
                 device_type: r.device_type,
                 bridge: r.bridge,
                 matcher: r.matcher,
+                description: r.description,
             };
             (name, device)
         })
@@ -275,6 +279,7 @@ mod tests {
 [tardis]
 type = "host"
 bridge = "fs"
+description = "MacBook Pro M2 Max 64GB"
 
 [jarvis]
 type = "phone"
@@ -286,6 +291,11 @@ match.serial = "ABC123"
         let raw: HashMap<String, DeviceRaw> = toml::from_str(s).unwrap();
         assert_eq!(raw["tardis"].device_type, DeviceType::Host);
         assert_eq!(raw["tardis"].bridge, Bridge::Fs);
+        assert_eq!(
+            raw["tardis"].description.as_deref(),
+            Some("MacBook Pro M2 Max 64GB")
+        );
+        assert_eq!(raw["jarvis"].description, None);
         assert_eq!(raw["jarvis"].matcher.vendor_id.as_deref(), Some("18d1"));
         assert_eq!(raw["jarvis"].matcher.serial.as_deref(), Some("ABC123"));
     }
@@ -379,6 +389,7 @@ role = "owner"
             device_type: t,
             bridge: Bridge::Fs,
             matcher: DeviceMatch::default(),
+            description: None,
         }
     }
 
