@@ -116,11 +116,13 @@ role = "read_write"
 
 ### Bridges
 
-| bridge | usage |
-|--------|-------|
-| `fs` | hôte, disques externes, FUSE |
-| `mtp` | Android (défaut) |
-| `adb` | Android override (debug USB requis) |
+| bridge | usage | setup phone |
+|--------|-------|-------------|
+| `fs`   | hôte, disques externes | — |
+| `mtp`  | Android, défaut, via `jmtpfs` (FUSE) | aucun |
+| `adb`  | Android, alternative recommandée pour power users : plus rapide, plus fiable, mtime précis | activer Developer Options + USB Debugging (~30s, une fois) |
+
+ADB n'est **pas** installé par défaut : il n'est tiré qu'à la demande si tu déclares `bridge = "adb"` sur un device.
 
 ### Roles
 
@@ -152,7 +154,7 @@ curl -fsSL https://slashome.me/apps/redlight.sh | sh       # à venir
 # .deb / .rpm / AUR : voir la page Releases GitHub          # à venir
 ```
 
-L'installateur téléchargera un binaire pré-compilé et installera automatiquement les dépendances système nécessaires (dont `libmtp`) via le gestionnaire de paquets de l'OS.
+L'installateur téléchargera un binaire pré-compilé et installera automatiquement les dépendances système nécessaires (`libmtp`, `jmtpfs`, `macfuse` sur Mac) via le gestionnaire de paquets de l'OS. Si tu actives un device en `bridge = "adb"`, il te proposera aussi `android-platform-tools`.
 
 ### Première utilisation
 
@@ -192,8 +194,8 @@ rl status
 | CLI | `clap` |
 | Config & manifeste | `serde` + `toml` |
 | Détection USB & volumes | `io-kit-sys` + `core-foundation` (macOS) / `udev` (Linux) |
-| Bridge MTP | `libmtp` + subprocess |
-| Bridge ADB | `adb` (optionnel) |
+| Bridge MTP | `jmtpfs` (FUSE) au-dessus de `libmtp` |
+| Bridge ADB | `adb` (Android Platform Tools, opt-in) |
 | Bridge FS | stdlib + `walkdir` |
 | Menu bar / tray | `tray-icon` (cross-platform) |
 | Async runtime | `tokio` |
@@ -222,10 +224,14 @@ rl status
 brew install rust                                                       # macOS
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh          # Linux/macOS via rustup
 
-# Dépendances système
+# Dépendances système (hard)
 brew install libmtp jmtpfs macfuse                                      # macOS
 sudo apt install libmtp-dev jmtpfs fuse libudev-dev pkg-config          # Debian/Ubuntu
 sudo dnf install libmtp-devel jmtpfs fuse systemd-devel pkg-config      # Fedora
+
+# Optionnel — uniquement pour bidouiller le bridge ADB
+brew install android-platform-tools                                     # macOS
+sudo apt install android-tools-adb                                      # Debian/Ubuntu
 
 # Build & tests
 git clone https://github.com/slashome/redlight && cd redlight
