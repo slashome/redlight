@@ -9,9 +9,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+pub mod adb;
 pub mod fs;
 pub mod mtp;
 
+pub use adb::AdbBridge;
 pub use fs::FsBridge;
 pub use mtp::{MountedMtpBridge, MtpBridge, MtpDeviceMatcher};
 
