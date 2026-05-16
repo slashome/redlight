@@ -31,7 +31,7 @@ Un sync existe entre deux devices pour un item ssi les deux ont un binding sur c
 | Combo | Comportement |
 |---|---|
 | Actif + Passif | cas standard, l'actif pilote |
-| Actif + Actif | supporté, réconciliation pairwise |
+| Actif + Actif | prévu par le modèle, hors scope v0.0.1 |
 | Passif + Passif | ignoré (pas de daemon) |
 
 Pour le schéma TOML détaillé, les filtres, les exclusions automatiques et des exemples de config (sync clé USB entière, etc.), voir **[docs/configuration.md](docs/configuration.md)**.

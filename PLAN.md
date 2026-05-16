@@ -33,6 +33,8 @@ Each device carries its own truth (its local manifest). Reconciliation happens *
 
 The active device propagates state by participating in many pairings, but holds no privileged "hub" status in the model.
 
+> **v0.0.1 implementation note** — `rl sync` iterates host ↔ drive pairs only; drive ↔ drive and phone participation are deferred (see [Deferred / known limitations](#deferred--known-limitations) and `src/sync/run.rs`). Transitivity through the host covers the standard "two drives both bound to an item via the host" case.
+
 ### Bridges
 
 Pluggable per-device interface (Rust trait): `list_files`, `get_file`, `put_file`, `delete_file`, `make_dir`, `get_metadata`.
