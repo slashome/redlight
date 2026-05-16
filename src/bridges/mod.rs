@@ -5,17 +5,22 @@
 //! default), or ADB (Android override). The sync engine works against the
 //! [`Bridge`] trait regardless of the underlying transport.
 
+use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
 pub mod adb;
+pub mod bootstrap;
 pub mod fs;
 pub mod mtp;
+pub mod registry;
 
 pub use adb::AdbBridge;
+pub use bootstrap::ensure_bootstrap;
 pub use fs::FsBridge;
 pub use mtp::{MountedMtpBridge, MtpBridge, MtpDeviceMatcher};
+pub use registry::build_bridge;
 
 /// Metadata for a single file. `path` is relative to the root passed to
 /// [`Bridge::list_files`]; `size` is in bytes; `mtime` is a Unix timestamp
@@ -30,7 +35,7 @@ pub struct FileMeta {
 /// Read/write a single device's files. Implementations are expected to be
 /// safe to share across threads (`Send + Sync`); the daemon serializes
 /// operations per device but may interleave across devices.
-pub trait Bridge: Send + Sync {
+pub trait Bridge: Debug + Send + Sync {
     /// Recursively list files under `start`. Returned paths are relative to
     /// `start`. Directories themselves are skipped.
     fn list_files(&self, start: &Path) -> Result<Vec<FileMeta>>;

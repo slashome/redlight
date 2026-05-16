@@ -461,6 +461,28 @@ Quit
 
 ---
 
+## Deferred / known limitations
+
+Things intentionally left for later, tracked here so they don't get
+lost. Each one is also marked with a `TODO(version)` comment at the
+exact code location.
+
+### Phase 2 — bridges
+
+- `registry::build_bridge` uses `unwrap_or_default()` on MTP matcher
+  fields. Harmless today (`jmtpfs` picks the first connected device)
+  but will silently produce wrong identifiers once multi-device
+  disambiguation lands. Replace with a required-field check.
+- `registry::build_bridge` eagerly mounts MTP devices at construction
+  time. Acceptable for v1; consider lazy mount on first op if it
+  becomes a measurable issue.
+- `bootstrap::ensure_bootstrap` conflates "file missing" with any
+  other metadata error (e.g. permission denied). Add a
+  `Bridge::exists()` method (or surface `io::ErrorKind`) once we need
+  the distinction.
+
+---
+
 ## Per-phase smoke test
 
 | Phase | Test |
