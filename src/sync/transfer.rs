@@ -26,7 +26,7 @@ use tempfile::NamedTempFile;
 
 use crate::bridges::Bridge;
 use crate::manifest::{FileEntry, Manifest};
-use crate::sync_log::now_unix;
+use crate::sync_log::{LogEntry, LogLevel, Operation, SyncLog, now_unix};
 
 use super::reconcile::SyncAction;
 
@@ -52,8 +52,11 @@ impl TransferReport {
     }
 }
 
-/// Run a single action, mutating the two manifests in-place. The caller
-/// is responsible for persisting them to disk at appropriate checkpoints.
+/// Run a single action, mutating the two manifests in-place and
+/// appending a [`LogEntry`] to `log`. The caller is responsible for
+/// persisting the manifests at appropriate checkpoints; the log
+/// auto-persists on each append.
+#[allow(clippy::too_many_arguments)]
 pub fn execute_action(
     action: &SyncAction,
     item: &str,
@@ -61,8 +64,11 @@ pub fn execute_action(
     manifest_a: &mut Manifest,
     side_b: &SideRef<'_>,
     manifest_b: &mut Manifest,
+    log: &mut SyncLog,
 ) -> Result<()> {
-    match action {
+    let key = action.path().to_string_lossy().into_owned();
+
+    let (target_device, result, op_when_ok) = match action {
         SyncAction::Push {
             from,
             to,
@@ -70,28 +76,82 @@ pub fn execute_action(
             size,
             mtime,
         } => {
-            let (src, dst) = pick_push_sides(from, to, side_a, side_b)?;
-            execute_push(
-                path,
-                *size,
-                *mtime,
-                item,
-                src,
-                dst,
-                manifest_a,
-                manifest_b,
-                side_a.name,
-            )
+            // Decide Create vs Update from the destination's manifest
+            // *before* the transfer mutates it.
+            let was_new = destination_manifest(to, side_a, manifest_a, side_b, manifest_b)
+                .map(|m| m.get_entry(item, &key).is_none())
+                .unwrap_or(true);
+            let res = pick_push_sides(from, to, side_a, side_b).and_then(|(src, dst)| {
+                execute_push(
+                    path,
+                    *size,
+                    *mtime,
+                    item,
+                    src,
+                    dst,
+                    manifest_a,
+                    manifest_b,
+                    side_a.name,
+                )
+            });
+            let op = if was_new {
+                Operation::Create
+            } else {
+                Operation::Update
+            };
+            (to.clone(), res, op)
         }
         SyncAction::Delete { device, path } => {
-            let target = pick_delete_side(device, side_a, side_b)?;
-            execute_delete(path, item, target, manifest_a, manifest_b)
+            let res = pick_delete_side(device, side_a, side_b)
+                .and_then(|target| execute_delete(path, item, target, manifest_a, manifest_b));
+            (device.clone(), res, Operation::Delete)
         }
+    };
+
+    let entry = LogEntry {
+        timestamp: now_unix(),
+        level: if result.is_ok() {
+            LogLevel::Info
+        } else {
+            LogLevel::Error
+        },
+        device: target_device,
+        item: item.to_string(),
+        operation: if result.is_ok() {
+            op_when_ok
+        } else {
+            Operation::Skip
+        },
+        file: key,
+        error: result.as_ref().err().map(|e| e.to_string()),
+    };
+    // Log failures are best-effort: they shouldn't replace a real error.
+    if let Err(e) = log.append(entry) {
+        eprintln!("warning: sync log append failed: {e}");
+    }
+
+    result
+}
+
+fn destination_manifest<'m>(
+    to: &str,
+    side_a: &SideRef<'_>,
+    manifest_a: &'m Manifest,
+    side_b: &SideRef<'_>,
+    manifest_b: &'m Manifest,
+) -> Option<&'m Manifest> {
+    if to == side_a.name {
+        Some(manifest_a)
+    } else if to == side_b.name {
+        Some(manifest_b)
+    } else {
+        None
     }
 }
 
 /// Convenience: run every action, collecting per-action successes and
 /// failures. Continues on error.
+#[allow(clippy::too_many_arguments)]
 pub fn execute_actions(
     actions: Vec<SyncAction>,
     item: &str,
@@ -99,10 +159,11 @@ pub fn execute_actions(
     manifest_a: &mut Manifest,
     side_b: &SideRef<'_>,
     manifest_b: &mut Manifest,
+    log: &mut SyncLog,
 ) -> TransferReport {
     let mut report = TransferReport::default();
     for action in actions {
-        match execute_action(&action, item, side_a, manifest_a, side_b, manifest_b) {
+        match execute_action(&action, item, side_a, manifest_a, side_b, manifest_b, log) {
             Ok(()) => report.successes.push(action),
             Err(e) => report.failures.push((action, e)),
         }
@@ -266,6 +327,14 @@ mod tests {
         }
     }
 
+    /// Open a fresh SyncLog in a TempDir. The directory is returned so
+    /// it stays alive for the test's duration.
+    fn fresh_log() -> (SyncLog, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let log = SyncLog::open(dir.path().join("log.toml")).unwrap();
+        (log, dir)
+    }
+
     fn touch(root: &Path, rel: &str, content: &str) {
         let p = root.join(rel);
         if let Some(parent) = p.parent() {
@@ -306,7 +375,11 @@ mod tests {
             mtime: 100,
         };
 
-        execute_action(&action, "music", &side_a, &mut ma, &side_b, &mut mb).unwrap();
+        let (mut log, _log_dir) = fresh_log();
+        execute_action(
+            &action, "music", &side_a, &mut ma, &side_b, &mut mb, &mut log,
+        )
+        .unwrap();
 
         let dst = tmp_b.path().join("song.mp3");
         assert!(dst.exists());
@@ -334,7 +407,11 @@ mod tests {
             size: 5,
             mtime: 100,
         };
-        execute_action(&action, "music", &side_a, &mut ma, &side_b, &mut mb).unwrap();
+        let (mut log, _log_dir) = fresh_log();
+        execute_action(
+            &action, "music", &side_a, &mut ma, &side_b, &mut mb, &mut log,
+        )
+        .unwrap();
 
         let expected = known_md5("hello");
         let ea = ma.get_entry("music", "song.mp3").unwrap();
@@ -369,7 +446,11 @@ mod tests {
             size: 1,
             mtime: 100,
         };
-        execute_action(&action, "music", &side_a, &mut ma, &side_b, &mut mb).unwrap();
+        let (mut log, _log_dir) = fresh_log();
+        execute_action(
+            &action, "music", &side_a, &mut ma, &side_b, &mut mb, &mut log,
+        )
+        .unwrap();
         assert!(tmp_b.path().join("Beatles/Yesterday.mp3").exists());
     }
 
@@ -394,7 +475,11 @@ mod tests {
             size: 5,
             mtime: 200,
         };
-        execute_action(&action, "music", &side_a, &mut ma, &side_b, &mut mb).unwrap();
+        let (mut log, _log_dir) = fresh_log();
+        execute_action(
+            &action, "music", &side_a, &mut ma, &side_b, &mut mb, &mut log,
+        )
+        .unwrap();
 
         assert_eq!(
             stdfs::read_to_string(tmp_a.path().join("song.mp3")).unwrap(),
@@ -445,7 +530,11 @@ mod tests {
             device: "a".into(),
             path: "old.mp3".into(),
         };
-        execute_action(&action, "music", &side_a, &mut ma, &side_b, &mut mb).unwrap();
+        let (mut log, _log_dir) = fresh_log();
+        execute_action(
+            &action, "music", &side_a, &mut ma, &side_b, &mut mb, &mut log,
+        )
+        .unwrap();
 
         assert!(!tmp_a.path().join("old.mp3").exists());
         assert!(ma.get_entry("music", "old.mp3").is_none());
@@ -471,9 +560,12 @@ mod tests {
             size: 1,
             mtime: 1,
         };
-        let err = execute_action(&action, "music", &side_a, &mut ma, &side_b, &mut mb)
-            .unwrap_err()
-            .to_string();
+        let (mut log, _log_dir) = fresh_log();
+        let err = execute_action(
+            &action, "music", &side_a, &mut ma, &side_b, &mut mb, &mut log,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("unknown device 'ghost'"));
     }
 
@@ -509,7 +601,10 @@ mod tests {
                 mtime: 1,
             },
         ];
-        let report = execute_actions(actions, "music", &side_a, &mut ma, &side_b, &mut mb);
+        let (mut log, _log_dir) = fresh_log();
+        let report = execute_actions(
+            actions, "music", &side_a, &mut ma, &side_b, &mut mb, &mut log,
+        );
 
         assert_eq!(report.successes.len(), 1);
         assert_eq!(report.failures.len(), 1);
@@ -548,7 +643,10 @@ mod tests {
                 mtime: 1,
             },
         ];
-        let report = execute_actions(actions, "music", &side_a, &mut ma, &side_b, &mut mb);
+        let (mut log, _log_dir) = fresh_log();
+        let report = execute_actions(
+            actions, "music", &side_a, &mut ma, &side_b, &mut mb, &mut log,
+        );
         assert!(report.is_clean());
         assert_eq!(report.successes.len(), 2);
     }

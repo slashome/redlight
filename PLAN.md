@@ -495,6 +495,11 @@ exact code location.
   `SyncSummary::skipped_devices`. Auto-detection arrives in Phase 4
   with the watcher; in the meantime a manual opt-in flag could be
   added if needed (`--include-phone NAME` mounting via jmtpfs/adb).
+- `SyncLog` is written only on the host
+  (`$XDG_STATE_HOME/redlight/sync_log.toml`). The spec mirrors it to
+  each touched device's `/.redlight/sync_log.toml` so a user looking
+  at the drive can see what Redlight did. Mirror-on-device is deferred
+  to v0.0.2 — pure bookkeeping, no functional impact.
 
 ---
 

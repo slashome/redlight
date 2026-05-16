@@ -318,6 +318,18 @@ pub fn config_dir() -> PathBuf {
     }
 }
 
+/// Where Redlight stores host-side mutable state (sync log, daemon log,
+/// lockfile). Mirrors `config_dir()` semantics with `$XDG_STATE_HOME`.
+pub fn state_dir() -> PathBuf {
+    if let Some(xdg) = std::env::var_os("XDG_STATE_HOME") {
+        PathBuf::from(xdg).join("redlight")
+    } else {
+        home_dir()
+            .map(|h| h.join(".local").join("state").join("redlight"))
+            .unwrap_or_else(|| PathBuf::from(".local/state/redlight"))
+    }
+}
+
 pub fn expand_path(s: &str) -> PathBuf {
     expand_path_with(s, home_dir())
 }

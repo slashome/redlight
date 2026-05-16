@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 
 use redlight::bridges::{AdbBridge, MtpBridge};
-use redlight::config::{Bridge as BridgeKind, Config, config_dir};
+use redlight::config::{Bridge as BridgeKind, Config, config_dir, state_dir};
 use redlight::sync::{SyncOpts, run_sync};
 
 #[derive(Parser)]
@@ -154,7 +154,12 @@ fn cmd_sync(dry_run: bool, drive_mount: Vec<String>) -> Result<()> {
         drive_mounts,
     };
 
-    let summary = run_sync(&config, &dir.join("manifest.toml"), &opts)?;
+    let summary = run_sync(
+        &config,
+        &dir.join("manifest.toml"),
+        &state_dir().join("sync_log.toml"),
+        &opts,
+    )?;
 
     println!();
     if !summary.skipped_devices.is_empty() {

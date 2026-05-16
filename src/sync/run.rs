@@ -24,6 +24,7 @@ use colored::Colorize;
 use crate::bridges::{Bridge, FsBridge, ensure_bootstrap};
 use crate::config::{Binding, Config, Device, DeviceType, Item};
 use crate::manifest::Manifest;
+use crate::sync_log::SyncLog;
 
 use super::diff::compute_diff;
 use super::reconcile::{SyncAction, reconcile};
@@ -52,9 +53,14 @@ pub struct SyncSummary {
 /// Drive each available host↔drive pair through diff → reconcile →
 /// transfer. Returns aggregate counters. Per-pair / per-action output
 /// is printed inline.
+///
+/// Each executed action is appended to `log_path` (the host-side
+/// [`SyncLog`]). v0.0.1 logs only on the host; mirroring to passive
+/// devices is deferred.
 pub fn run_sync(
     config: &Config,
     host_manifest_path: &Path,
+    log_path: &Path,
     opts: &SyncOpts,
 ) -> Result<SyncSummary> {
     let host = config
@@ -64,6 +70,8 @@ pub fn run_sync(
         .ok_or_else(|| anyhow!("no host device declared in config"))?;
 
     let mut summary = SyncSummary::default();
+    let mut log = SyncLog::open(log_path)
+        .with_context(|| format!("opening sync log at {}", log_path.display()))?;
 
     for device in config.devices.values() {
         match device.device_type {
@@ -84,6 +92,7 @@ pub fn run_sync(
                         host_manifest_path,
                         opts,
                         &mut summary,
+                        &mut log,
                     )?;
                 }
                 None => {
@@ -121,6 +130,7 @@ fn sync_host_with_drive(
     host_manifest_path: &Path,
     opts: &SyncOpts,
     summary: &mut SyncSummary,
+    log: &mut SyncLog,
 ) -> Result<()> {
     let host_bridge = FsBridge::host();
     let drive_bridge = FsBridge::at_mount(mount);
@@ -163,6 +173,7 @@ fn sync_host_with_drive(
             &mut drive_manifest,
             opts,
             summary,
+            log,
         )?;
     }
 
@@ -192,6 +203,7 @@ fn sync_item(
     drive_manifest: &mut Manifest,
     opts: &SyncOpts,
     summary: &mut SyncSummary,
+    log: &mut SyncLog,
 ) -> Result<()> {
     println!(
         "{} {} {} ↔ {}",
@@ -239,6 +251,7 @@ fn sync_item(
         host_manifest,
         &side_d,
         drive_manifest,
+        log,
     );
 
     for action in &report.successes {
@@ -364,7 +377,13 @@ mod tests {
             dry_run: false,
             drive_mounts: HashMap::from([("materia".into(), drive_dir.path().to_path_buf())]),
         };
-        let summary = run_sync(&cfg, &config_dir.path().join("manifest.toml"), &opts).unwrap();
+        let summary = run_sync(
+            &cfg,
+            &config_dir.path().join("manifest.toml"),
+            &config_dir.path().join("sync_log.toml"),
+            &opts,
+        )
+        .unwrap();
 
         assert_eq!(summary.pairs, 1);
         assert_eq!(summary.successes, 1);
@@ -373,6 +392,42 @@ mod tests {
             stdfs::read_to_string(drive_dir.path().join("song.mp3")).unwrap(),
             "hello"
         );
+    }
+
+    #[test]
+    fn sync_appends_to_host_log() {
+        use crate::sync_log::{LogLevel, Operation, SyncLog};
+
+        let host_dir = TempDir::new().unwrap();
+        let drive_dir = TempDir::new().unwrap();
+        let config_dir = TempDir::new().unwrap();
+
+        touch(&host_dir.path().join("song.mp3"), "hello");
+
+        let cfg = make_config(host_dir.path(), "MATERIA");
+        let opts = SyncOpts {
+            dry_run: false,
+            drive_mounts: HashMap::from([("materia".into(), drive_dir.path().to_path_buf())]),
+        };
+        let log_path = config_dir.path().join("sync_log.toml");
+
+        run_sync(
+            &cfg,
+            &config_dir.path().join("manifest.toml"),
+            &log_path,
+            &opts,
+        )
+        .unwrap();
+
+        let log = SyncLog::open(&log_path).unwrap();
+        assert_eq!(log.len(), 1);
+        let entry = &log.entries()[0];
+        assert_eq!(entry.level, LogLevel::Info);
+        assert_eq!(entry.device, "materia");
+        assert_eq!(entry.item, "music");
+        assert_eq!(entry.operation, Operation::Create);
+        assert_eq!(entry.file, "song.mp3");
+        assert!(entry.error.is_none());
     }
 
     #[test]
@@ -389,7 +444,13 @@ mod tests {
             drive_mounts: HashMap::from([("materia".into(), drive_dir.path().to_path_buf())]),
         };
         let host_manifest_path = config_dir.path().join("manifest.toml");
-        let summary = run_sync(&cfg, &host_manifest_path, &opts).unwrap();
+        let summary = run_sync(
+            &cfg,
+            &host_manifest_path,
+            &config_dir.path().join("sync_log.toml"),
+            &opts,
+        )
+        .unwrap();
 
         assert_eq!(summary.pairs, 1);
         assert_eq!(summary.successes, 0);
@@ -413,11 +474,23 @@ mod tests {
         let host_manifest_path = config_dir.path().join("manifest.toml");
 
         // First sync: 1 transfer.
-        let s1 = run_sync(&cfg, &host_manifest_path, &opts).unwrap();
+        let s1 = run_sync(
+            &cfg,
+            &host_manifest_path,
+            &config_dir.path().join("sync_log.toml"),
+            &opts,
+        )
+        .unwrap();
         assert_eq!(s1.successes, 1);
 
         // Second sync with nothing changed: should be 0 transfers.
-        let s2 = run_sync(&cfg, &host_manifest_path, &opts).unwrap();
+        let s2 = run_sync(
+            &cfg,
+            &host_manifest_path,
+            &config_dir.path().join("sync_log.toml"),
+            &opts,
+        )
+        .unwrap();
         assert_eq!(s2.successes, 0);
         assert_eq!(s2.failures, 0);
     }
@@ -435,7 +508,13 @@ mod tests {
             dry_run: false,
             drive_mounts: HashMap::from([("materia".into(), drive_dir.path().to_path_buf())]),
         };
-        run_sync(&cfg, &config_dir.path().join("manifest.toml"), &opts).unwrap();
+        run_sync(
+            &cfg,
+            &config_dir.path().join("manifest.toml"),
+            &config_dir.path().join("sync_log.toml"),
+            &opts,
+        )
+        .unwrap();
 
         assert_eq!(
             stdfs::read_to_string(host_dir.path().join("only-on-drive.mp3")).unwrap(),
@@ -453,7 +532,13 @@ mod tests {
             dry_run: false,
             drive_mounts: HashMap::new(),
         };
-        let summary = run_sync(&cfg, &config_dir.path().join("manifest.toml"), &opts).unwrap();
+        let summary = run_sync(
+            &cfg,
+            &config_dir.path().join("manifest.toml"),
+            &config_dir.path().join("sync_log.toml"),
+            &opts,
+        )
+        .unwrap();
         assert_eq!(summary.pairs, 0);
         assert!(
             summary
@@ -472,9 +557,14 @@ mod tests {
         cfg.devices.remove("tardis");
 
         let opts = SyncOpts::default();
-        let err = run_sync(&cfg, &config_dir.path().join("manifest.toml"), &opts)
-            .unwrap_err()
-            .to_string();
+        let err = run_sync(
+            &cfg,
+            &config_dir.path().join("manifest.toml"),
+            &config_dir.path().join("sync_log.toml"),
+            &opts,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("no host"));
     }
 }
