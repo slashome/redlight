@@ -10,8 +10,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 pub mod fs;
+pub mod mtp;
 
 pub use fs::FsBridge;
+pub use mtp::{MountedMtpBridge, MtpBridge, MtpDeviceMatcher};
 
 /// Metadata for a single file. `path` is relative to the root passed to
 /// [`Bridge::list_files`]; `size` is in bytes; `mtime` is a Unix timestamp

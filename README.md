@@ -222,10 +222,10 @@ rl status
 brew install rust                                                       # macOS
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh          # Linux/macOS via rustup
 
-# Headers de dev
-brew install libmtp                                                     # macOS
-sudo apt install libmtp-dev libudev-dev pkg-config                      # Debian/Ubuntu
-sudo dnf install libmtp-devel systemd-devel pkg-config                  # Fedora
+# Dépendances système
+brew install libmtp jmtpfs macfuse                                      # macOS
+sudo apt install libmtp-dev jmtpfs fuse libudev-dev pkg-config          # Debian/Ubuntu
+sudo dnf install libmtp-devel jmtpfs fuse systemd-devel pkg-config      # Fedora
 
 # Build & tests
 git clone https://github.com/slashome/redlight && cd redlight
