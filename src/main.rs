@@ -1,9 +1,13 @@
-use anyhow::Result;
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 
 use redlight::bridges::{AdbBridge, MtpBridge};
 use redlight::config::{Bridge as BridgeKind, Config, config_dir};
+use redlight::sync::{SyncOpts, run_sync};
 
 #[derive(Parser)]
 #[command(name = "rl", version, about = "Redlight — sync USB multi-devices.")]
@@ -25,6 +29,20 @@ enum Command {
     /// Vérifier que les prérequis système (jmtpfs, adb…) sont disponibles
     /// pour chaque device configuré.
     Doctor,
+    /// Lancer une synchronisation host ↔ drive(s).
+    ///
+    /// Détecte les drives montés (via `/Volumes/<label>` ou
+    /// `/media/<label>`) et synchronise chaque item partagé avec le host.
+    /// Les phones sont gérés par le daemon (Phase 4).
+    Sync {
+        /// Affiche ce qui serait fait sans rien transférer.
+        #[arg(long)]
+        dry_run: bool,
+        /// Force un point de montage pour un drive : `--drive-mount materia=/Volumes/MATERIA`.
+        /// Répétable pour plusieurs drives.
+        #[arg(long = "drive-mount", value_name = "NAME=PATH")]
+        drive_mount: Vec<String>,
+    },
 }
 
 fn cmd_doctor() -> Result<()> {
@@ -108,6 +126,64 @@ fn cmd_doctor() -> Result<()> {
     Ok(())
 }
 
+fn parse_drive_mounts(raw: &[String]) -> Result<HashMap<String, PathBuf>> {
+    raw.iter()
+        .map(|s| {
+            s.split_once('=')
+                .with_context(|| format!("invalid --drive-mount: expected NAME=PATH, got `{s}`"))
+                .map(|(name, path)| (name.to_string(), PathBuf::from(path)))
+        })
+        .collect()
+}
+
+fn cmd_sync(dry_run: bool, drive_mount: Vec<String>) -> Result<()> {
+    let dir = config_dir();
+    if !dir.join("devices.toml").exists() {
+        println!(
+            "Aucune config trouvée à {}.\nLance {} pour en créer une.",
+            dir.display(),
+            "rl init".bold()
+        );
+        return Ok(());
+    }
+
+    let config = Config::load(&dir)?;
+    let drive_mounts = parse_drive_mounts(&drive_mount)?;
+    let opts = SyncOpts {
+        dry_run,
+        drive_mounts,
+    };
+
+    let summary = run_sync(&config, &dir.join("manifest.toml"), &opts)?;
+
+    println!();
+    if !summary.skipped_devices.is_empty() {
+        for s in &summary.skipped_devices {
+            println!("{} {}", "skipped:".dimmed(), s.dimmed());
+        }
+    }
+
+    let line = if opts.dry_run {
+        format!("Dry run. {} paire(s) examinée(s).", summary.pairs)
+    } else {
+        format!(
+            "Terminé. {} paire(s), {} action(s), {} échec(s).",
+            summary.pairs, summary.successes, summary.failures
+        )
+    };
+    let styled = if summary.failures > 0 {
+        line.red().bold()
+    } else {
+        line.green().bold()
+    };
+    println!("{styled}");
+
+    if summary.failures > 0 {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -116,6 +192,10 @@ fn main() -> Result<()> {
         Some(Command::Stop) => println!("stop: not yet implemented"),
         Some(Command::Status) => println!("status: not yet implemented"),
         Some(Command::Doctor) => cmd_doctor()?,
+        Some(Command::Sync {
+            dry_run,
+            drive_mount,
+        }) => cmd_sync(dry_run, drive_mount)?,
         None => println!("rl {} — passe --help", redlight::VERSION),
     }
     Ok(())

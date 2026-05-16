@@ -17,8 +17,10 @@
 
 pub mod diff;
 mod reconcile;
+mod run;
 mod transfer;
 
 pub use diff::{Diff, FileChange, compute_diff};
 pub use reconcile::{SyncAction, reconcile};
+pub use run::{SyncOpts, SyncSummary, run_sync};
 pub use transfer::{SideRef, TransferReport, execute_action, execute_actions};
