@@ -481,6 +481,19 @@ exact code location.
   `Bridge::exists()` method (or surface `io::ErrorKind`) once we need
   the distinction.
 
+### Phase 3 — sync
+
+- `run_sync` only iterates host ↔ drive pairs, not the full pairwise
+  ring among all present devices. The host is the de facto hub:
+  when two drives are both bound to an item via the host, transitivity
+  syncs them via the host. The only configuration this misses is
+  "two drives share an item, with no host binding" — implausible
+  enough to defer. Revisit if a real use case shows up.
+- `run_sync` skips phone devices entirely. They surface in
+  `SyncSummary::skipped_devices`. Auto-detection arrives in Phase 4
+  with the watcher; in the meantime a manual opt-in flag could be
+  added if needed (`--include-phone NAME` mounting via jmtpfs/adb).
+
 ---
 
 ## Per-phase smoke test

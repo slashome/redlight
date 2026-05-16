@@ -8,6 +8,12 @@
 //!   `/Volumes/<label>` or `/media/<label>`).
 //! - Phones are skipped — automatic detection comes with the daemon
 //!   watcher in Phase 4.
+//!
+//! Topology: only host ↔ drive pairs run. We don't do direct
+//! drive ↔ drive: when both drives are bound to the same item *and*
+//! the host is bound to it too, transitivity through the host keeps
+//! them in agreement. The edge case "two drives share an item with
+//! no host binding" is out of scope — see PLAN.md "Deferred".
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
