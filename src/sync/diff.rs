@@ -173,10 +173,44 @@ fn file_changes(
 
 // ---------- glob filters ----------
 
+/// Paths Redlight always refuses to sync, regardless of user's
+/// include/exclude. Covers:
+/// - Redlight's own bookkeeping (`.redlight/` on each device).
+/// - macOS Finder/Spotlight/Trash detritus.
+/// - Windows shell + recycle bin + system volume info.
+/// - Linux trash + `lost+found`.
+///
+/// All patterns use `**/` prefix so they match at any depth (including
+/// the binding root itself).
+pub const SYSTEM_EXCLUDES: &[&str] = &[
+    // Redlight itself.
+    "**/.redlight/**",
+    // macOS.
+    "**/.DS_Store",
+    "**/.Spotlight-V100/**",
+    "**/.Trashes/**",
+    "**/.fseventsd/**",
+    "**/.TemporaryItems/**",
+    "**/.AppleDouble/**",
+    "**/.AppleDB/**",
+    "**/.AppleDesktop/**",
+    "**/._*",
+    // Windows.
+    "**/Thumbs.db",
+    "**/ehthumbs.db",
+    "**/desktop.ini",
+    "**/$RECYCLE.BIN/**",
+    "**/System Volume Information/**",
+    // Linux / Unix-y.
+    "**/lost+found/**",
+    "**/.Trash-*/**",
+];
+
 struct Filters {
     /// Non-empty include set: file must match at least one.
     include: Option<GlobSet>,
-    /// Exclude set: file must not match any. Always applied (possibly empty).
+    /// Exclude set: file must not match any. Always non-empty because
+    /// it carries [`SYSTEM_EXCLUDES`] plus the user-supplied patterns.
     exclude: GlobSet,
 }
 
@@ -187,7 +221,10 @@ impl Filters {
         } else {
             Some(build_set(include)?)
         };
-        let exclude = build_set(exclude)?;
+        let mut excludes: Vec<&str> = SYSTEM_EXCLUDES.to_vec();
+        let user_excludes: Vec<&str> = exclude.iter().map(String::as_str).collect();
+        excludes.extend(user_excludes);
+        let exclude = build_set_str(&excludes)?;
         Ok(Self { include, exclude })
     }
 
@@ -199,6 +236,15 @@ impl Filters {
         }
         !self.exclude.is_match(path)
     }
+}
+
+fn build_set_str(patterns: &[&str]) -> Result<GlobSet> {
+    let mut b = GlobSetBuilder::new();
+    for p in patterns {
+        let g = Glob::new(p).with_context(|| format!("invalid glob: {p}"))?;
+        b.add(g);
+    }
+    b.build().context("building glob set")
 }
 
 fn build_set(patterns: &[String]) -> Result<GlobSet> {
@@ -541,6 +587,74 @@ mod tests {
     }
 
     // ---- glob compile errors ----
+
+    // ---- system excludes ----
+
+    #[test]
+    fn folder_skips_redlight_bookkeeping() {
+        let tmp = TempDir::new().unwrap();
+        let bridge = FsBridge::at_mount(tmp.path());
+        touch(tmp.path(), ".redlight/manifest.toml", "x");
+        touch(tmp.path(), ".redlight/sync_log.toml", "y");
+        touch(tmp.path(), "song.mp3", "s");
+
+        let device = make_drive("materia");
+        let item = make_item("music", ItemKind::Folder, &[], &[]);
+        let binding = make_binding("music", "materia", None);
+        let manifest = Manifest::new("materia");
+
+        let diff = compute_diff(&bridge, &binding, &item, &device, &manifest).unwrap();
+        let paths: BTreeSet<_> = diff
+            .changes
+            .iter()
+            .map(|c| c.path().to_path_buf())
+            .collect();
+        assert_eq!(paths, BTreeSet::from([PathBuf::from("song.mp3")]));
+    }
+
+    #[test]
+    fn folder_skips_macos_detritus() {
+        let tmp = TempDir::new().unwrap();
+        let bridge = FsBridge::at_mount(tmp.path());
+        touch(tmp.path(), ".DS_Store", "x");
+        touch(tmp.path(), "Sub/.DS_Store", "x");
+        touch(tmp.path(), "real.mp3", "r");
+
+        let device = make_drive("materia");
+        let item = make_item("music", ItemKind::Folder, &[], &[]);
+        let binding = make_binding("music", "materia", None);
+        let manifest = Manifest::new("materia");
+
+        let diff = compute_diff(&bridge, &binding, &item, &device, &manifest).unwrap();
+        let paths: BTreeSet<_> = diff
+            .changes
+            .iter()
+            .map(|c| c.path().to_path_buf())
+            .collect();
+        assert_eq!(paths, BTreeSet::from([PathBuf::from("real.mp3")]));
+    }
+
+    #[test]
+    fn user_excludes_still_apply_alongside_system() {
+        let tmp = TempDir::new().unwrap();
+        let bridge = FsBridge::at_mount(tmp.path());
+        touch(tmp.path(), ".redlight/x", "1"); // skipped by system
+        touch(tmp.path(), "draft-a.mp3", "2"); // skipped by user
+        touch(tmp.path(), "real.mp3", "3"); // kept
+
+        let device = make_drive("materia");
+        let item = make_item("music", ItemKind::Folder, &[], &["**/draft-*"]);
+        let binding = make_binding("music", "materia", None);
+        let manifest = Manifest::new("materia");
+
+        let diff = compute_diff(&bridge, &binding, &item, &device, &manifest).unwrap();
+        let paths: BTreeSet<_> = diff
+            .changes
+            .iter()
+            .map(|c| c.path().to_path_buf())
+            .collect();
+        assert_eq!(paths, BTreeSet::from([PathBuf::from("real.mp3")]));
+    }
 
     #[test]
     fn invalid_glob_returns_error() {

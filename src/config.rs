@@ -632,6 +632,36 @@ role = "owner"
         cfg.validate().unwrap();
     }
 
+    // ---- binding to device root (legitimate "sync the whole device" case) ----
+
+    #[test]
+    fn accept_drive_binding_to_root() {
+        // The "USB key fully synced" use case: drive bound to "/" on
+        // itself maps to a subfolder on other devices. System excludes
+        // (in sync::diff) keep `.redlight/` out of the picture.
+        let mut cfg = valid_config();
+        cfg.bindings.push(Binding {
+            item: "music".into(),
+            device: "materia".into(),
+            path: Some("/".into()),
+            role: Role::ReadWrite,
+        });
+        cfg.validate().unwrap();
+    }
+
+    #[test]
+    fn accept_drive_binding_default_path() {
+        // Defaulting to the device root is fine too.
+        let mut cfg = valid_config();
+        cfg.bindings.push(Binding {
+            item: "music".into(),
+            device: "materia".into(),
+            path: None,
+            role: Role::ReadWrite,
+        });
+        cfg.validate().unwrap();
+    }
+
     // ---- duplicate bindings ----
 
     #[test]
