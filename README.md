@@ -34,6 +34,8 @@ Un sync existe entre deux devices pour un item ssi les deux ont un binding sur c
 | Actif + Actif | supporté, réconciliation pairwise |
 | Passif + Passif | ignoré (pas de daemon) |
 
+Pour le schéma TOML détaillé, les filtres, les exclusions automatiques et des exemples de config (sync clé USB entière, etc.), voir **[docs/configuration.md](docs/configuration.md)**.
+
 ---
 
 ## Fonctionnement
@@ -47,91 +49,6 @@ Un sync existe entre deux devices pour un item ssi les deux ont un binding sur c
 5. Réconciliation pairwise, transferts respectant les `role`
 6. Mise à jour des manifestes locaux et du log
 7. Notification via menu bar
-
----
-
-## Configuration
-
-`~/.config/redlight/devices.toml` :
-
-```toml
-[tardis]
-type = "host"
-bridge = "fs"
-
-[jarvis]
-type = "phone"
-bridge = "mtp"
-match.vendor_id = "18d1"
-match.product_id = "4ee7"
-match.serial = "ABC123"
-
-[materia]
-type = "drive"
-bridge = "fs"
-match.volume_label = "MATERIA"
-```
-
-`~/.config/redlight/items.toml` :
-
-```toml
-[music]
-kind = "folder"
-category = "audio"
-include = ["**/*.mp3", "**/*.flac"]
-exclude = ["**/draft-*"]
-
-[contrat-freelance]
-kind = "file"
-category = "admin"
-```
-
-`~/.config/redlight/bindings.toml` :
-
-```toml
-[[binding]]
-item = "music"
-device = "tardis"
-path = "~/Music"
-role = "read_write"
-
-[[binding]]
-item = "music"
-device = "jarvis"
-path = "/storage/emulated/0/Music"
-role = "read_only"
-
-[[binding]]
-item = "music"
-device = "materia"
-role = "read_write"
-```
-
-### Types d'item
-
-| kind | comportement |
-|------|-------------|
-| `folder` | tout le contenu, récursif, filtrable via `include` / `exclude` |
-| `file` | uniquement ce fichier |
-
-### Bridges
-
-| bridge | usage | setup phone |
-|--------|-------|-------------|
-| `fs`   | hôte, disques externes | — |
-| `mtp`  | Android, défaut, via `jmtpfs` (FUSE) | aucun |
-| `adb`  | Android, alternative recommandée pour power users : plus rapide, plus fiable, mtime précis | activer Developer Options + USB Debugging (~30s, une fois) |
-
-ADB n'est **pas** installé par défaut : il n'est tiré qu'à la demande si tu déclares `bridge = "adb"` sur un device.
-
-### Roles
-
-| role | comportement |
-|------|-------------|
-| `read_write` | participe pleinement |
-| `read_only` | reçoit, ne pousse jamais |
-
-Chemins par défaut si `path` absent : `$HOME` sur host, racine du device sur disque, `/storage/emulated/0/` sur Android.
 
 ---
 
@@ -176,10 +93,11 @@ rl status
 | `rl init` | initialise la config et enregistre l'agent (launchd / systemd user) |
 | `rl start` / `rl stop` / `rl restart` | contrôle du daemon |
 | `rl status` | état du daemon, devices connectés, dernière sync par binding |
+| `rl doctor` | vérifie que les prérequis système (jmtpfs, adb…) sont disponibles |
 | `rl device add\|remove\|list` | gestion des devices |
 | `rl item add\|remove\|list` | gestion des items |
 | `rl bind add\|remove\|list` | gestion des bindings |
-| `rl sync [--dry-run] [--item N] [--device N]` | force une sync immédiate |
+| `rl sync [--dry-run] [--drive-mount NAME=PATH]` | force une sync immédiate |
 | `rl log [--errors] [--device N] [--item N] [--tail N]` | affiche les logs |
 | `rl manifest [--device N] [--item N]` | affiche le manifeste |
 
@@ -200,7 +118,7 @@ rl status
 | Menu bar / tray | `tray-icon` (cross-platform) |
 | Async runtime | `tokio` |
 | Logs | `tracing` + `tracing-subscriber` |
-| Filtres glob | `ignore` |
+| Filtres glob | `globset` |
 | Hashing | `md-5` |
 | Packaging | `cargo-bundle` (macOS) / `cargo-deb` (Linux) / `cargo-wix` (Windows v2) |
 
@@ -239,6 +157,8 @@ cargo build
 cargo test
 cargo run -- --help
 ```
+
+Doc plus poussée : [docs/configuration.md](docs/configuration.md).
 
 ---
 
