@@ -5,7 +5,8 @@
 //! - `items.toml`    — synced units (folders/files) with include/exclude filters
 //! - `bindings.toml` — pairs (item × device) with path + role
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -24,12 +25,32 @@ pub enum DeviceType {
     Drive,
 }
 
+impl fmt::Display for DeviceType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            DeviceType::Host => "host",
+            DeviceType::Phone => "phone",
+            DeviceType::Drive => "drive",
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Bridge {
     Fs,
     Mtp,
     Adb,
+}
+
+impl fmt::Display for Bridge {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Bridge::Fs => "fs",
+            Bridge::Mtp => "mtp",
+            Bridge::Adb => "adb",
+        })
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
@@ -83,6 +104,8 @@ struct ItemRaw {
     #[serde(default)]
     category: Option<String>,
     #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
     include: Vec<String>,
     #[serde(default)]
     exclude: Vec<String>,
@@ -93,6 +116,7 @@ pub struct Item {
     pub name: String,
     pub kind: ItemKind,
     pub category: Option<String>,
+    pub description: Option<String>,
     pub include: Vec<String>,
     pub exclude: Vec<String>,
 }
@@ -129,8 +153,8 @@ struct BindingsFile {
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub devices: HashMap<String, Device>,
-    pub items: HashMap<String, Item>,
+    pub devices: BTreeMap<String, Device>,
+    pub items: BTreeMap<String, Item>,
     pub bindings: Vec<Binding>,
 }
 
@@ -149,30 +173,90 @@ impl Config {
         Ok(config)
     }
 
+    /// Collect *every* validation error and report them together. The user
+    /// shouldn't have to fix one, re-run, fix the next, etc.
     fn validate(&self) -> Result<()> {
-        for b in &self.bindings {
-            if !self.devices.contains_key(&b.device) {
-                bail!(
-                    "binding for item '{}' references unknown device '{}'",
-                    b.item,
-                    b.device
-                );
-            }
-            if !self.items.contains_key(&b.item) {
-                bail!(
-                    "binding on device '{}' references unknown item '{}'",
-                    b.device,
-                    b.item
-                );
+        let mut errors: Vec<String> = Vec::new();
+
+        // 1. Bridge ↔ DeviceType compatibility.
+        for (name, d) in &self.devices {
+            if !bridge_allowed(d.device_type, d.bridge) {
+                errors.push(format!(
+                    "device '{}': bridge '{}' is incompatible with type '{}'",
+                    name, d.bridge, d.device_type
+                ));
             }
         }
-        Ok(())
+
+        // 2. Each device type has its own identification requirements.
+        for (name, d) in &self.devices {
+            match d.device_type {
+                DeviceType::Host => {
+                    // The host is "us": no matcher needed.
+                }
+                DeviceType::Phone => {
+                    if d.matcher.serial.is_none() {
+                        errors.push(format!(
+                            "device '{}' (phone): match.serial is required to identify the device",
+                            name
+                        ));
+                    }
+                }
+                DeviceType::Drive => {
+                    if d.matcher.volume_label.is_none() && d.matcher.volume_uuid.is_none() {
+                        errors.push(format!(
+                            "device '{}' (drive): one of match.volume_label or match.volume_uuid is required",
+                            name
+                        ));
+                    }
+                }
+            }
+        }
+
+        // 3. Bindings: cross-references + duplicate (item, device) pairs.
+        let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
+        for b in &self.bindings {
+            if !self.devices.contains_key(&b.device) {
+                errors.push(format!(
+                    "binding for item '{}' references unknown device '{}'",
+                    b.item, b.device
+                ));
+            }
+            if !self.items.contains_key(&b.item) {
+                errors.push(format!(
+                    "binding on device '{}' references unknown item '{}'",
+                    b.device, b.item
+                ));
+            }
+            if !seen.insert((b.item.as_str(), b.device.as_str())) {
+                errors.push(format!(
+                    "duplicate binding: item '{}' on device '{}' declared more than once",
+                    b.item, b.device
+                ));
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            bail!("config validation failed:\n  - {}", errors.join("\n  - "));
+        }
     }
 }
 
-fn load_devices(path: &Path) -> Result<HashMap<String, Device>> {
+const fn bridge_allowed(t: DeviceType, b: Bridge) -> bool {
+    matches!(
+        (t, b),
+        (DeviceType::Host, Bridge::Fs)
+            | (DeviceType::Drive, Bridge::Fs)
+            | (DeviceType::Phone, Bridge::Mtp)
+            | (DeviceType::Phone, Bridge::Adb)
+    )
+}
+
+fn load_devices(path: &Path) -> Result<BTreeMap<String, Device>> {
     let s = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let raw: HashMap<String, DeviceRaw> =
+    let raw: BTreeMap<String, DeviceRaw> =
         toml::from_str(&s).with_context(|| format!("parsing {}", path.display()))?;
     Ok(raw
         .into_iter()
@@ -189,9 +273,9 @@ fn load_devices(path: &Path) -> Result<HashMap<String, Device>> {
         .collect())
 }
 
-fn load_items(path: &Path) -> Result<HashMap<String, Item>> {
+fn load_items(path: &Path) -> Result<BTreeMap<String, Item>> {
     let s = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    let raw: HashMap<String, ItemRaw> =
+    let raw: BTreeMap<String, ItemRaw> =
         toml::from_str(&s).with_context(|| format!("parsing {}", path.display()))?;
     Ok(raw
         .into_iter()
@@ -200,6 +284,7 @@ fn load_items(path: &Path) -> Result<HashMap<String, Item>> {
                 name: name.clone(),
                 kind: r.kind,
                 category: r.category,
+                description: r.description,
                 include: r.include,
                 exclude: r.exclude,
             };
@@ -273,6 +358,74 @@ impl Binding {
 mod tests {
     use super::*;
 
+    // ---- helpers ----
+
+    fn make_item(name: &str) -> Item {
+        Item {
+            name: name.into(),
+            kind: ItemKind::Folder,
+            category: None,
+            description: None,
+            include: vec![],
+            exclude: vec![],
+        }
+    }
+
+    fn make_device(name: &str, t: DeviceType) -> Device {
+        Device {
+            name: name.into(),
+            device_type: t,
+            bridge: Bridge::Fs,
+            matcher: DeviceMatch::default(),
+            description: None,
+        }
+    }
+
+    fn make_phone(name: &str) -> Device {
+        Device {
+            name: name.into(),
+            device_type: DeviceType::Phone,
+            bridge: Bridge::Mtp,
+            matcher: DeviceMatch {
+                serial: Some("SN-0000".into()),
+                ..Default::default()
+            },
+            description: None,
+        }
+    }
+
+    fn make_drive(name: &str) -> Device {
+        Device {
+            name: name.into(),
+            device_type: DeviceType::Drive,
+            bridge: Bridge::Fs,
+            matcher: DeviceMatch {
+                volume_label: Some("LABEL".into()),
+                ..Default::default()
+            },
+            description: None,
+        }
+    }
+
+    fn valid_config() -> Config {
+        Config {
+            devices: BTreeMap::from([
+                ("tardis".into(), make_device("tardis", DeviceType::Host)),
+                ("jarvis".into(), make_phone("jarvis")),
+                ("materia".into(), make_drive("materia")),
+            ]),
+            items: BTreeMap::from([("music".into(), make_item("music"))]),
+            bindings: vec![Binding {
+                item: "music".into(),
+                device: "tardis".into(),
+                path: Some("~/Music".into()),
+                role: Role::ReadWrite,
+            }],
+        }
+    }
+
+    // ---- TOML parsing ----
+
     #[test]
     fn parse_devices_toml() {
         let s = r#"
@@ -288,7 +441,7 @@ match.vendor_id = "18d1"
 match.product_id = "4ee7"
 match.serial = "ABC123"
 "#;
-        let raw: HashMap<String, DeviceRaw> = toml::from_str(s).unwrap();
+        let raw: BTreeMap<String, DeviceRaw> = toml::from_str(s).unwrap();
         assert_eq!(raw["tardis"].device_type, DeviceType::Host);
         assert_eq!(raw["tardis"].bridge, Bridge::Fs);
         assert_eq!(
@@ -306,16 +459,22 @@ match.serial = "ABC123"
 [music]
 kind = "folder"
 category = "audio"
+description = "Ma collection FLAC trié par artiste"
 include = ["**/*.mp3"]
 exclude = ["**/draft-*"]
 
 [contrat]
 kind = "file"
 "#;
-        let raw: HashMap<String, ItemRaw> = toml::from_str(s).unwrap();
+        let raw: BTreeMap<String, ItemRaw> = toml::from_str(s).unwrap();
         assert_eq!(raw["music"].kind, ItemKind::Folder);
+        assert_eq!(
+            raw["music"].description.as_deref(),
+            Some("Ma collection FLAC trié par artiste")
+        );
         assert_eq!(raw["music"].include, vec!["**/*.mp3".to_string()]);
         assert_eq!(raw["contrat"].kind, ItemKind::File);
+        assert_eq!(raw["contrat"].description, None);
         assert!(raw["contrat"].include.is_empty());
     }
 
@@ -346,7 +505,7 @@ role = "read_only"
 type = "alien"
 bridge = "fs"
 "#;
-        let r = toml::from_str::<HashMap<String, DeviceRaw>>(s);
+        let r = toml::from_str::<BTreeMap<String, DeviceRaw>>(s);
         assert!(r.is_err());
     }
 
@@ -357,7 +516,7 @@ bridge = "fs"
 type = "host"
 bridge = "smb"
 "#;
-        let r = toml::from_str::<HashMap<String, DeviceRaw>>(s);
+        let r = toml::from_str::<BTreeMap<String, DeviceRaw>>(s);
         assert!(r.is_err());
     }
 
@@ -373,57 +532,146 @@ role = "owner"
         assert!(r.is_err());
     }
 
-    fn make_item(name: &str) -> Item {
-        Item {
-            name: name.into(),
-            kind: ItemKind::Folder,
-            category: None,
-            include: vec![],
-            exclude: vec![],
-        }
-    }
+    // ---- cross-references ----
 
-    fn make_device(name: &str, t: DeviceType) -> Device {
-        Device {
-            name: name.into(),
-            device_type: t,
-            bridge: Bridge::Fs,
-            matcher: DeviceMatch::default(),
-            description: None,
-        }
+    #[test]
+    fn baseline_valid_config_passes() {
+        valid_config().validate().unwrap();
     }
 
     #[test]
     fn validation_rejects_binding_to_unknown_device() {
-        let cfg = Config {
-            devices: HashMap::new(),
-            items: HashMap::from([("music".into(), make_item("music"))]),
-            bindings: vec![Binding {
-                item: "music".into(),
-                device: "ghost".into(),
-                path: None,
-                role: Role::ReadWrite,
-            }],
-        };
-        let err = cfg.validate().unwrap_err();
-        assert!(err.to_string().contains("unknown device 'ghost'"));
+        let mut cfg = valid_config();
+        cfg.bindings.push(Binding {
+            item: "music".into(),
+            device: "ghost".into(),
+            path: None,
+            role: Role::ReadWrite,
+        });
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("unknown device 'ghost'"));
     }
 
     #[test]
     fn validation_rejects_binding_to_unknown_item() {
-        let cfg = Config {
-            devices: HashMap::from([("tardis".into(), make_device("tardis", DeviceType::Host))]),
-            items: HashMap::new(),
-            bindings: vec![Binding {
-                item: "ghost".into(),
-                device: "tardis".into(),
-                path: None,
-                role: Role::ReadWrite,
-            }],
-        };
-        let err = cfg.validate().unwrap_err();
-        assert!(err.to_string().contains("unknown item 'ghost'"));
+        let mut cfg = valid_config();
+        cfg.bindings.push(Binding {
+            item: "ghost".into(),
+            device: "tardis".into(),
+            path: None,
+            role: Role::ReadWrite,
+        });
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("unknown item 'ghost'"));
     }
+
+    // ---- bridge ↔ type compatibility ----
+
+    #[test]
+    fn reject_mtp_on_host() {
+        let mut cfg = valid_config();
+        cfg.devices.get_mut("tardis").unwrap().bridge = Bridge::Mtp;
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("bridge 'mtp'") && err.contains("type 'host'"));
+    }
+
+    #[test]
+    fn reject_fs_on_phone() {
+        let mut cfg = valid_config();
+        cfg.devices.get_mut("jarvis").unwrap().bridge = Bridge::Fs;
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("bridge 'fs'") && err.contains("type 'phone'"));
+    }
+
+    #[test]
+    fn reject_adb_on_drive() {
+        let mut cfg = valid_config();
+        cfg.devices.get_mut("materia").unwrap().bridge = Bridge::Adb;
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("bridge 'adb'") && err.contains("type 'drive'"));
+    }
+
+    #[test]
+    fn accept_adb_on_phone() {
+        let mut cfg = valid_config();
+        cfg.devices.get_mut("jarvis").unwrap().bridge = Bridge::Adb;
+        cfg.validate().unwrap();
+    }
+
+    // ---- matcher requirements ----
+
+    #[test]
+    fn reject_phone_without_serial() {
+        let mut cfg = valid_config();
+        cfg.devices.get_mut("jarvis").unwrap().matcher = DeviceMatch::default();
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("match.serial is required"));
+    }
+
+    #[test]
+    fn reject_drive_without_label_or_uuid() {
+        let mut cfg = valid_config();
+        cfg.devices.get_mut("materia").unwrap().matcher = DeviceMatch::default();
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("volume_label") && err.contains("volume_uuid"));
+    }
+
+    #[test]
+    fn accept_drive_with_only_uuid() {
+        let mut cfg = valid_config();
+        cfg.devices.get_mut("materia").unwrap().matcher = DeviceMatch {
+            volume_uuid: Some("1234-ABCD".into()),
+            ..Default::default()
+        };
+        cfg.validate().unwrap();
+    }
+
+    #[test]
+    fn host_needs_no_matcher() {
+        let cfg = valid_config(); // tardis has no matcher set
+        cfg.validate().unwrap();
+    }
+
+    // ---- duplicate bindings ----
+
+    #[test]
+    fn reject_duplicate_binding() {
+        let mut cfg = valid_config();
+        cfg.bindings.push(Binding {
+            item: "music".into(),
+            device: "tardis".into(),
+            path: Some("~/Other".into()),
+            role: Role::ReadOnly,
+        });
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(
+            err.contains("duplicate binding") && err.contains("music") && err.contains("tardis")
+        );
+    }
+
+    // ---- multi-error collection ----
+
+    #[test]
+    fn reports_all_errors_at_once() {
+        let mut cfg = valid_config();
+        cfg.devices.get_mut("jarvis").unwrap().bridge = Bridge::Fs; // bridge mismatch
+        cfg.devices.get_mut("materia").unwrap().matcher = DeviceMatch::default(); // missing matcher
+        cfg.bindings.push(Binding {
+            item: "ghost".into(),
+            device: "tardis".into(),
+            path: None,
+            role: Role::ReadWrite,
+        }); // unknown item
+
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("bridge 'fs'") && err.contains("type 'phone'"));
+        assert!(err.contains("volume_label"));
+        assert!(err.contains("unknown item 'ghost'"));
+        // Header line + bullets count should be 3 issues.
+        assert_eq!(err.matches("\n  - ").count(), 3);
+    }
+
+    // ---- path resolution ----
 
     #[test]
     fn expand_tilde_slash() {
@@ -458,7 +706,7 @@ role = "owner"
 
     #[test]
     fn binding_resolved_path_uses_explicit_when_present() {
-        let device = make_device("jarvis", DeviceType::Phone);
+        let device = make_phone("jarvis");
         let binding = Binding {
             item: "music".into(),
             device: "jarvis".into(),
@@ -470,7 +718,7 @@ role = "owner"
 
     #[test]
     fn binding_resolved_path_uses_phone_default() {
-        let device = make_device("jarvis", DeviceType::Phone);
+        let device = make_phone("jarvis");
         let binding = Binding {
             item: "music".into(),
             device: "jarvis".into(),
@@ -485,7 +733,7 @@ role = "owner"
 
     #[test]
     fn binding_resolved_path_uses_drive_default() {
-        let device = make_device("materia", DeviceType::Drive);
+        let device = make_drive("materia");
         let binding = Binding {
             item: "music".into(),
             device: "materia".into(),
