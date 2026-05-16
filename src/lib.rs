@@ -2,6 +2,7 @@
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub mod bridges;
 pub mod config;
 pub mod manifest;
 pub mod sync_log;
