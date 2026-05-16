@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 
 use redlight::bridges::{AdbBridge, MtpBridge};
 use redlight::config::{Bridge as BridgeKind, Config, config_dir};
@@ -31,8 +32,9 @@ fn cmd_doctor() -> Result<()> {
     let devices_toml = dir.join("devices.toml");
     if !devices_toml.exists() {
         println!(
-            "Aucune config trouvée à {}.\nLance `rl init` pour en créer une.",
-            dir.display()
+            "Aucune config trouvée à {}.\nLance {} pour en créer une.",
+            dir.display(),
+            "rl init".bold()
         );
         return Ok(());
     }
@@ -44,8 +46,12 @@ fn cmd_doctor() -> Result<()> {
     }
 
     println!(
-        "Vérification de {} device(s) configuré(s)…\n",
-        config.devices.len()
+        "{}\n",
+        format!(
+            "Vérification de {} device(s) configuré(s)…",
+            config.devices.len()
+        )
+        .bold()
     );
 
     let mut issues = 0;
@@ -66,21 +72,39 @@ fn cmd_doctor() -> Result<()> {
             }
         };
 
+        let icon = if check.is_ok() {
+            "✓".green().bold()
+        } else {
+            "✗".red().bold()
+        };
+        let prefix = format!(
+            "  {} {}{} · bridge {}",
+            icon,
+            name.bold(),
+            label.dimmed(),
+            device.bridge.to_string().cyan(),
+        );
+
         match check {
-            Ok(msg) => println!("  ✓  {name}{label}  bridge {} — {msg}", device.bridge),
+            Ok(msg) => println!("{prefix} · {}", msg.dimmed()),
             Err(e) => {
                 issues += 1;
-                println!("  ✗  {name}{label}  bridge {} — {e}", device.bridge);
+                println!("{prefix}\n      {}", e.to_string().red());
             }
         }
     }
 
     println!();
     if issues > 0 {
-        println!("{issues} problème(s) détecté(s).");
+        let msg = if issues == 1 {
+            "1 problème détecté.".to_string()
+        } else {
+            format!("{issues} problèmes détectés.")
+        };
+        println!("{}", msg.red().bold());
         std::process::exit(1);
     }
-    println!("Tout OK.");
+    println!("{}", "Tout OK.".green().bold());
     Ok(())
 }
 
