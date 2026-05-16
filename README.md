@@ -9,7 +9,7 @@ Redlight est un programme cross-platform (macOS + Linux en v1, Windows en v2) qu
 ## Philosophie
 
 - **Multi-périphériques.** Ordi, téléphone, disque externe — tous sont des devices au même titre. Chacun porte son état local.
-- **Le ring.** Pas de hub privilégié : quand deux devices sont co-présents, ils se réconcilient pairwise. Le plus récent gagne.
+- **Le ring.** Modèle cible : pas de hub privilégié, deux devices co-présents se réconcilient pairwise et le plus récent gagne. *(En v0.0.1 `rl sync` n'orchestre que les paires host ↔ drive ; deux drives partageant un item via le host sont quand même synchronisés par transitivité — cf. "Ne fait pas v1".)*
 - **Pas de cloud.** Tout passe par USB, rien ne transite par un serveur tiers.
 - **Pas de dossier imposé.** Chaque règle pointe vers les vrais emplacements des fichiers, où qu'ils soient.
 - **Les passifs ne font rien.** Téléphone et disque sont passifs, ils portent juste leur manifeste. Seul l'ordi exécute.
@@ -132,6 +132,8 @@ rl status
 - Pas de chiffrement (prévu v2)
 - Pas de support Windows (prévu v2)
 - Pas de gestion fine des conflits (le plus récent gagne)
+- Pas de sync drive ↔ drive direct dans `rl sync` — la transitivité par le host couvre le cas standard
+- Pas de sync sur phone via `rl sync` — auto-détection USB en Phase 4 ; en attendant : `cargo run --example mtp_probe` ou `adb_probe`
 
 ---
 
