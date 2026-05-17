@@ -14,8 +14,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 pub mod mock;
+pub mod poll;
 
 pub use mock::MockWatcher;
+pub use poll::PollWatcher;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceEvent {
