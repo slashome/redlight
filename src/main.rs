@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -7,7 +9,9 @@ use colored::Colorize;
 
 use redlight::bridges::{AdbBridge, MtpBridge};
 use redlight::config::{Bridge as BridgeKind, Config, config_dir, state_dir};
+use redlight::daemon::{self, DaemonOpts};
 use redlight::sync::{SyncOpts, run_sync};
+use redlight::watcher::PollWatcher;
 
 #[derive(Parser)]
 #[command(name = "rl", version, about = "Redlight — sync USB multi-devices.")]
@@ -43,6 +47,13 @@ enum Command {
         #[arg(long = "drive-mount", value_name = "NAME=PATH")]
         drive_mount: Vec<String>,
     },
+    /// Lance le daemon en foreground.
+    ///
+    /// Polle `/Volumes` (macOS) ou `/media` + `/mnt` (Linux) toutes les
+    /// ~2s ; chaque drive reconnu déclenche une sync immédiate.
+    /// Ctrl-C pour quitter (signal handler propre arrivera avec
+    /// Phase 4.5/4.6). Les phones ne sont pas encore détectés.
+    Daemon,
 }
 
 fn cmd_doctor() -> Result<()> {
@@ -189,6 +200,28 @@ fn cmd_sync(dry_run: bool, drive_mount: Vec<String>) -> Result<()> {
     Ok(())
 }
 
+fn cmd_daemon() -> Result<()> {
+    let dir = config_dir();
+    if !dir.join("devices.toml").exists() {
+        println!(
+            "Aucune config trouvée à {}.\nLance {} pour en créer une.",
+            dir.display(),
+            "rl init".bold()
+        );
+        return Ok(());
+    }
+    let config = Config::load(&dir)?;
+    let watcher = PollWatcher::for_os();
+    let stop = Arc::new(AtomicBool::new(false));
+    let opts = DaemonOpts {
+        host_manifest_path: dir.join("manifest.toml"),
+        log_path: state_dir().join("sync_log.toml"),
+        stop,
+    };
+    daemon::run(&config, watcher, &opts)?;
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -201,6 +234,7 @@ fn main() -> Result<()> {
             dry_run,
             drive_mount,
         }) => cmd_sync(dry_run, drive_mount)?,
+        Some(Command::Daemon) => cmd_daemon()?,
         None => println!("rl {} — passe --help", redlight::VERSION),
     }
     Ok(())
