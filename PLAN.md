@@ -418,7 +418,11 @@ Quit
 
 - [ ] macOS: `cargo bundle --release` → `.app`; `create-dmg` for `.dmg`; signing (Apple Developer ID, optional)
 - [ ] Linux: `cargo deb` for Debian/Ubuntu, `cargo generate-rpm` for Fedora; AUR PKGBUILD
-- [ ] Homebrew formula (`slashome/homebrew-tap` puis migration vers core)
+- [ ] Homebrew tap `slashome/homebrew-redlight` (own tap first, homebrew-core later if popular enough):
+  - `service do { run [opt_bin/"rl", "daemon"]; keep_alive true; … }` → brew auto-generates the launchd plist, user enables with `brew services start redlight`
+  - `caveats` block: tell the user to `brew install --cask macfuse` separately (macFUSE is a cask because of the kernel extension; can't be a `depends_on` in a Formula) + the start command
+  - Release workflow: `git tag v0.0.X` → `shasum -a 256` of the tarball → bump `url`/`sha256` in `redlight.rb` in the tap → push tap
+  - `rl init` only writes config files; service registration / start lives entirely in brew/systemd land (Unix convention)
 - [ ] Installateur `redlight.sh` hébergé sur `slashome.me/apps/`: détecte l'OS, télécharge le binaire de la dernière release GitHub, installe `libmtp` via le gestionnaire de paquets local
 - [ ] `.icns` / `.png` icon
 - [ ] Update check via GitHub releases API
