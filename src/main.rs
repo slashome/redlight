@@ -11,7 +11,7 @@ use redlight::bridges::{AdbBridge, MtpBridge};
 use redlight::config::{Bridge as BridgeKind, Config, config_dir, state_dir};
 use redlight::daemon::{self, DaemonOpts};
 use redlight::sync::{SyncOpts, run_sync};
-use redlight::watcher::PollWatcher;
+use redlight::watcher::{AdbPollWatcher, MultiWatcher, PollWatcher};
 
 #[derive(Parser)]
 #[command(name = "rl", version, about = "Redlight — sync USB multi-devices.")]
@@ -211,7 +211,22 @@ fn cmd_daemon() -> Result<()> {
         return Ok(());
     }
     let config = Config::load(&dir)?;
-    let watcher = PollWatcher::for_os();
+
+    let mut watcher = MultiWatcher::new();
+    watcher.add(Box::new(PollWatcher::for_os()));
+    match AdbPollWatcher::new() {
+        Ok(adb) => {
+            watcher.add(Box::new(adb));
+            println!("{}", "  + adb watcher enabled".dimmed());
+        }
+        Err(_) => {
+            println!(
+                "{}",
+                "  - adb not in PATH, phone watching disabled".dimmed()
+            );
+        }
+    }
+
     let stop = Arc::new(AtomicBool::new(false));
     let opts = DaemonOpts {
         host_manifest_path: dir.join("manifest.toml"),
