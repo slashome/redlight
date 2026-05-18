@@ -13,10 +13,14 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+pub mod adb_poll;
 pub mod mock;
+pub mod multi;
 pub mod poll;
 
+pub use adb_poll::AdbPollWatcher;
 pub use mock::MockWatcher;
+pub use multi::MultiWatcher;
 pub use poll::PollWatcher;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
