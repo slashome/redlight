@@ -1,0 +1,17 @@
+[[binding]]
+item = "music"
+device = "tardis"
+path = "~/Music"
+role = "read_write"
+
+[[binding]]
+item = "music"
+device = "hal9000"
+path = "~/Music"
+role = "read_write"
+
+[[binding]]
+item = "music"
+device = "materia"
+path = "/Music"
+role = "read_write"

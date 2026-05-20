@@ -220,3 +220,72 @@ role = "read_only"                                  # le phone reçoit, ne pouss
 ```
 
 `materia` n'a aucun binding sur `xfiles` → la clé ne se reflète pas sur le SSD. Les fichiers de bookkeeping (`xfiles:/.redlight/manifest.toml`) sont automatiquement filtrés et n'apparaissent pas dans le sous-dossier `xfiles/` des autres devices.
+
+---
+
+## Exemple : 2 ordinateurs + un SSD navette
+
+Cas d'usage : tu as un Mac perso (tardis) et un Mac de travail (hal9000), un SSD (materia) que tu emportes avec toi. Tu veux que ta collection musique soit synchronisée entre les deux machines, materia servant de courrier — un Mac n'est jamais directement en présence de l'autre.
+
+Le modèle Redlight le supporte directement : on déclare **les deux machines comme des `type = "host"`**, le SSD comme drive, et trois bindings. Au runtime, chaque machine identifie quelle entrée host elle est via le champ `match.hostname` (comparé à `gethostname()`).
+
+`devices.toml` :
+```toml
+[tardis]
+type = "host"
+bridge = "fs"
+description = "MacBook Pro perso"
+match.hostname = "tardis.local"
+
+[hal9000]
+type = "host"
+bridge = "fs"
+description = "Mac Pro travail"
+match.hostname = "hal9000.work.local"
+
+[materia]
+type = "drive"
+bridge = "fs"
+description = "SSD navette perso ↔ taf"
+match.volume_label = "MATERIA"
+```
+
+`items.toml` :
+```toml
+[music]
+kind = "folder"
+```
+
+`bindings.toml` :
+```toml
+[[binding]]
+item = "music"
+device = "tardis"
+path = "~/Music"
+role = "read_write"
+
+[[binding]]
+item = "music"
+device = "hal9000"
+path = "~/Music"        # même chemin relatif au $HOME, même si l'utilisateur diffère
+role = "read_write"
+
+[[binding]]
+item = "music"
+device = "materia"
+path = "/Music"
+role = "read_write"
+```
+
+**Comment ça se déroule :**
+
+1. Chez toi, tardis tourne avec ce config. Tu branches materia. Le daemon de tardis sync `~/Music` (tardis) ↔ `/Music` (materia).
+2. Tu débranches materia, tu pars au travail.
+3. Au taf, hal9000 tourne avec le **même** config (synchronisé via dotfiles, par exemple). Tu branches materia. Le daemon de hal9000 sync `~/Music` (hal9000) ↔ `/Music` (materia).
+4. Net effet : la musique présente sur tardis a transité par materia jusqu'à hal9000, et inversement.
+
+Trois remarques :
+
+- Le **même fichier de config** marche sur les deux machines. `match.hostname` permet à chaque daemon de savoir laquelle des entrées host est lui.
+- Si tu n'as qu'**une seule** machine, tu peux omettre `match.hostname` et déclarer un seul host — Redlight prend ce host par défaut.
+- Si tu en as **plusieurs** et qu'aucune n'a `match.hostname` qui matche, le daemon refuse de démarrer avec un message clair pointant vers la correction nécessaire. Pas de "qui tire le premier" silencieux.

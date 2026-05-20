@@ -45,3 +45,32 @@ fn loads_valid_fixture() {
         .expect("a binding to jarvis");
     assert_eq!(to_jarvis.role, Role::ReadOnly);
 }
+
+#[test]
+fn loads_multi_host_fixture() {
+    let dir = Path::new("tests/fixtures/config-multi-host");
+    let cfg = Config::load(dir).expect("multi-host config should load");
+
+    // 3 devices: 2 hosts + 1 drive.
+    assert_eq!(cfg.devices.len(), 3);
+    let hosts: Vec<_> = cfg
+        .devices
+        .values()
+        .filter(|d| d.device_type == DeviceType::Host)
+        .collect();
+    assert_eq!(hosts.len(), 2);
+
+    let tardis = &cfg.devices["tardis"];
+    assert_eq!(tardis.device_type, DeviceType::Host);
+    assert_eq!(tardis.matcher.hostname.as_deref(), Some("tardis.local"));
+
+    let hal9000 = &cfg.devices["hal9000"];
+    assert_eq!(hal9000.device_type, DeviceType::Host);
+    assert_eq!(
+        hal9000.matcher.hostname.as_deref(),
+        Some("hal9000.work.local")
+    );
+
+    // music is bound on all three (both hosts + materia).
+    assert_eq!(cfg.bindings.iter().filter(|b| b.item == "music").count(), 3);
+}

@@ -1,0 +1,4 @@
+[music]
+kind = "folder"
+description = "Collection musique partagée perso ↔ taf via Materia"
+include = ["**/*.mp3", "**/*.flac"]

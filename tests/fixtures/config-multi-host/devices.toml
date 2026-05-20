@@ -1,0 +1,17 @@
+[tardis]
+type = "host"
+bridge = "fs"
+description = "MacBook Pro perso (chez moi)"
+match.hostname = "tardis.local"
+
+[hal9000]
+type = "host"
+bridge = "fs"
+description = "Mac Pro travail"
+match.hostname = "hal9000.work.local"
+
+[materia]
+type = "drive"
+bridge = "fs"
+description = "SSD navette entre perso et travail"
+match.volume_label = "MATERIA"
