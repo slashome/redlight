@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, bail};
 use colored::Colorize;
 
 use crate::bridges::{Bridge, FsBridge, ensure_bootstrap};
@@ -63,11 +63,7 @@ pub fn run_sync(
     log_path: &Path,
     opts: &SyncOpts,
 ) -> Result<SyncSummary> {
-    let host = config
-        .devices
-        .values()
-        .find(|d| d.device_type == DeviceType::Host)
-        .ok_or_else(|| anyhow!("no host device declared in config"))?;
+    let host = pick_host(config)?;
 
     let mut summary = SyncSummary::default();
     let mut log = SyncLog::open(log_path)
@@ -105,6 +101,44 @@ pub fn run_sync(
     }
 
     Ok(summary)
+}
+
+/// Pick the host device that represents this running machine.
+///
+/// Rules:
+/// 1. If a host's `match.hostname` equals the current OS hostname → use it.
+/// 2. Else, if exactly one host is declared → use it (back-compat for
+///    single-machine configs).
+/// 3. Else (multiple hosts, none matches hostname) → bail with a clear
+///    error pointing the user at `match.hostname`.
+fn pick_host(config: &Config) -> Result<&Device> {
+    let hosts: Vec<&Device> = config
+        .devices
+        .values()
+        .filter(|d| d.device_type == DeviceType::Host)
+        .collect();
+    if hosts.is_empty() {
+        bail!("no host device declared in config");
+    }
+    let current = current_hostname();
+    if let Some(h) = hosts
+        .iter()
+        .find(|d| d.matcher.hostname.as_deref() == Some(current.as_str()))
+    {
+        return Ok(*h);
+    }
+    if hosts.len() == 1 {
+        return Ok(hosts[0]);
+    }
+    bail!(
+        "multiple host devices declared but none matches this machine's hostname '{}'. \
+         Set `match.hostname` on the relevant host in devices.toml.",
+        current
+    );
+}
+
+fn current_hostname() -> String {
+    gethostname::gethostname().to_string_lossy().into_owned()
 }
 
 fn drive_mount(device: &Device, opts: &SyncOpts) -> Option<PathBuf> {

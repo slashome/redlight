@@ -65,6 +65,11 @@ pub struct DeviceMatch {
     pub volume_label: Option<String>,
     #[serde(default)]
     pub volume_uuid: Option<String>,
+    /// Only meaningful for `type = "host"`. Lets a config that declares
+    /// multiple hosts identify which one is the current machine (matched
+    /// against `gethostname()` at runtime).
+    #[serde(default)]
+    pub hostname: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
