@@ -54,33 +54,36 @@ Every time a known device is plugged in:
 
 ## Installation
 
-> ⚠️ No distribution channel is active yet. Everything below is the target.
-
 ### macOS
 
 ```bash
-brew install redlight                                      # coming soon
-# or
-curl -fsSL https://slashome.me/apps/redlight.sh | sh       # coming soon
+brew tap slashome/tap
+brew install redlight
 ```
+
+Phone-bridge prerequisites are not pulled in automatically — install only what you need:
+
+- **MTP** (most Android phones in default USB mode): `brew install --cask macfuse`, then build [`jmtpfs`](https://github.com/dechamps/jmtpfs) from source (no homebrew formula on macOS).
+- **ADB** (Android phones in USB-debugging mode): `brew install --cask android-platform-tools`.
 
 ### Linux
 
 ```bash
-curl -fsSL https://slashome.me/apps/redlight.sh | sh       # coming soon
-# .deb / .rpm / AUR : see the GitHub Releases page          # coming soon
+# .deb / .rpm / AUR — coming with later releases
+cargo install --git https://github.com/slashome/redlight  # in the meantime
 ```
 
-The installer will download a pre-built binary and automatically install the required system dependencies (`libmtp`, `jmtpfs`, `macfuse` on Mac) via the OS package manager. If you enable a device with `bridge = "adb"`, it will also offer to install `android-platform-tools`.
+Phone bridges on Linux use the distro package manager: `apt install jmtpfs adb`, `dnf install jmtpfs android-tools`, etc.
 
 ### First-time setup
 
 ```bash
-rl init                                                          # creates the config, registers the system service
-rl start                                                         # starts the daemon (auto at login afterwards)
-rl device add jarvis --type phone --bridge mtp                   # declare a device
+rl init                                                          # writes the config skeleton + first host entry
+rl device add jarvis --type phone --bridge mtp --serial …        # declare a device
 rl item add music --kind folder --include "**/*.mp3"             # declare an item
 rl bind add --item music --device tardis --path ~/Music --role read_write
+brew services start redlight                                     # daemon up at login (macOS)
+# or: systemctl --user enable --now redlight                     # (Linux)
 rl status
 ```
 
