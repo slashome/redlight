@@ -6,7 +6,9 @@
 //! file ops to [`FsBridge`] and unmounts on drop.
 //!
 //! Requires `jmtpfs` (plus its `libmtp` + FUSE dependencies) installed on
-//! the host. The Redlight installer is responsible for providing it.
+//! the host. There's no homebrew formula for `jmtpfs` on macOS — users
+//! install macFUSE via cask and then build `jmtpfs` from source; on
+//! Linux it's a regular distro package.
 //!
 //! Known limitation (v0.0.1): when multiple MTP devices are plugged in,
 //! `jmtpfs` selects the first one. The `matcher` field is stored but not
@@ -53,9 +55,11 @@ impl MtpBridge {
             .output()
             .map_err(|e| {
                 anyhow::anyhow!(
-                    "jmtpfs not found in PATH ({e}). The Redlight installer should provide it; \
-                 install manually with `brew install jmtpfs` (macOS) or \
-                 `apt install jmtpfs` (Debian/Ubuntu)."
+                    "jmtpfs not found in PATH ({e}).\n  \
+                     macOS:  no homebrew formula — build from source\n          \
+                             (https://github.com/dechamps/jmtpfs)\n          \
+                             after `brew install --cask macfuse`\n  \
+                     Linux:  `apt install jmtpfs` / `dnf install jmtpfs`"
                 )
             })?;
         Ok(())
