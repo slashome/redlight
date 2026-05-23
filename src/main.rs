@@ -13,26 +13,24 @@ use redlight::daemon::{self, DaemonOpts};
 use redlight::sync::{SyncOpts, run_sync};
 use redlight::watcher::{AdbPollWatcher, MultiWatcher, PollWatcher};
 
-const BANNER: &str = "
-                       :-=+*#%@@@%#*+=-:
-                  .-=*%@@@@@@@@@@@@@@@@@%*=-.
-               .=#%@@@@@@@@@@@@@@@@@@@@@@@@@%#=.
-             =%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%=
-       ─────────────────────────────────────────────────
-         ____   _____  ____    _      ___   ____  _   _  _____
-        |  _ \\ | ____||  _ \\  | |    |_ _| / ___|| | | ||_   _|
-        | |_) ||  _|  | | | | | |     | | | |  _ | |_| |  | |
-        |  _ < | |___ | |_| | | |___  | | | |_| ||  _  |  | |
-        |_| \\_\\|_____||____/  |_____|___| \\____||_| |_|  |_|
+const BANNER: &str = r"
+                          :-=+*#%@@@@@@%#*+=-:
+                     :-=*%@@@@@@@@@@@@@@@@@@@@@@%*=-:
+                .=#%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%#=.
+              *%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%*
+            =%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%=
+        ────────────────────────────────────────────────────────────────
+
+      ██████╗ ███████╗██████╗ ██╗     ██╗ ██████╗ ██╗  ██╗████████╗
+      ██╔══██╗██╔════╝██╔══██╗██║     ██║██╔════╝ ██║  ██║╚══██╔══╝
+      ██████╔╝█████╗  ██║  ██║██║     ██║██║  ███╗███████║   ██║
+      ██╔══██╗██╔══╝  ██║  ██║██║     ██║██║   ██║██╔══██║   ██║
+      ██║  ██║███████╗██████╔╝███████╗██║╚██████╔╝██║  ██║   ██║
+      ╚═╝  ╚═╝╚══════╝╚═════╝ ╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝
 ";
 
 #[derive(Parser)]
-#[command(
-    name = "rl",
-    version,
-    about = "Redlight — sync USB multi-devices.",
-    before_help = BANNER
-)]
+#[command(name = "rl", version, about = "Redlight — sync USB multi-devices.")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -1476,7 +1474,26 @@ fn cmd_daemon() -> Result<()> {
     Ok(())
 }
 
+fn print_banner_and_help() -> Result<()> {
+    // colored crate auto-respects NO_COLOR and tty detection, so this is
+    // plain text when output is redirected to a file or `less` without -R.
+    println!("{}", BANNER.red().bold());
+    Cli::command().print_help()?;
+    println!();
+    Ok(())
+}
+
 fn main() -> Result<()> {
+    // Intercept the bare invocation and the top-level help flags before
+    // clap's --help exits the process, so we can wrap the banner with ANSI
+    // colors that the const can't carry.
+    let args: Vec<String> = std::env::args().collect();
+    let wants_help_at_top_level =
+        args.len() == 1 || (args.len() == 2 && matches!(args[1].as_str(), "--help" | "-h"));
+    if wants_help_at_top_level {
+        return print_banner_and_help();
+    }
+
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Init { name, description }) => cmd_init(name, description)?,
@@ -1511,10 +1528,7 @@ fn main() -> Result<()> {
             BindAction::List => cmd_bind_list()?,
             BindAction::Remove { item, device } => cmd_bind_remove(item, device)?,
         },
-        None => {
-            Cli::command().print_help()?;
-            println!();
-        }
+        None => unreachable!("bare invocation is intercepted at the top of main"),
     }
     Ok(())
 }
