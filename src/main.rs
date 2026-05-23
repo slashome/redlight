@@ -80,6 +80,11 @@ enum Command {
         #[command(subcommand)]
         action: ItemAction,
     },
+    /// Manage bindings (item × device pairs) in the config.
+    Bind {
+        #[command(subcommand)]
+        action: BindAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -97,6 +102,38 @@ enum ItemAction {
     Add(ItemAddArgs),
     /// List all configured items.
     List,
+}
+
+#[derive(Subcommand)]
+enum BindAction {
+    /// Add a binding (an item × device pair) to bindings.toml.
+    /// Reverts on validation error.
+    Add(BindAddArgs),
+    /// List all bindings, grouped by item.
+    List,
+}
+
+#[derive(clap::Args, Debug)]
+struct BindAddArgs {
+    /// Item name (must exist in items.toml).
+    #[arg(long)]
+    item: String,
+    /// Device name (must exist in devices.toml).
+    #[arg(long)]
+    device: String,
+    /// Path on the device. Optional; defaults per device type
+    /// ($HOME for host, `/` for drive, `/storage/emulated/0/` for phone).
+    #[arg(long)]
+    path: Option<String>,
+    /// read_write | read_only
+    #[arg(long)]
+    role: String,
+    /// Device-specific allowlist glob (repeatable, intersects with item's).
+    #[arg(long)]
+    include: Vec<String>,
+    /// Device-specific denylist glob (repeatable, unions with item's).
+    #[arg(long)]
+    exclude: Vec<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -512,6 +549,134 @@ fn cmd_item_list() -> Result<()> {
     Ok(())
 }
 
+fn cmd_bind_add(args: BindAddArgs) -> Result<()> {
+    let dir = config_dir();
+    let path = dir.join("bindings.toml");
+    if !path.exists() {
+        bail!("No config found at {}. Run `rl init` first.", dir.display());
+    }
+
+    let original =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+
+    let mut entry = String::from("[[binding]]\n");
+    entry.push_str(&format!("item = \"{}\"\n", args.item));
+    entry.push_str(&format!("device = \"{}\"\n", args.device));
+    if let Some(p) = &args.path {
+        entry.push_str(&format!("path = \"{}\"\n", p.replace('"', "\\\"")));
+    }
+    entry.push_str(&format!("role = \"{}\"\n", args.role));
+    if !args.include.is_empty() {
+        entry.push_str(&format!("include = {}\n", toml_string_array(&args.include)));
+    }
+    if !args.exclude.is_empty() {
+        entry.push_str(&format!("exclude = {}\n", toml_string_array(&args.exclude)));
+    }
+
+    let new_content = if original.trim().is_empty() {
+        entry
+    } else if original.ends_with('\n') {
+        format!("{original}\n{entry}")
+    } else {
+        format!("{original}\n\n{entry}")
+    };
+
+    std::fs::write(&path, &new_content).with_context(|| format!("writing {}", path.display()))?;
+
+    match Config::load(&dir) {
+        Ok(_) => {
+            println!(
+                "{} bound item {} on device {}.",
+                "✓".green(),
+                args.item.bold(),
+                args.device.bold()
+            );
+            Ok(())
+        }
+        Err(e) => {
+            std::fs::write(&path, &original).ok();
+            bail!("config would be invalid, reverted:\n{e:#}");
+        }
+    }
+}
+
+fn cmd_bind_list() -> Result<()> {
+    use std::collections::BTreeMap;
+
+    let dir = config_dir();
+    if !dir.join("bindings.toml").exists() {
+        println!("No config found at {}.", dir.display());
+        println!("Run {} to create one.", "rl init".bold());
+        return Ok(());
+    }
+    let config = Config::load(&dir)?;
+
+    if config.bindings.is_empty() {
+        println!(
+            "No bindings configured. Add some with {}.",
+            "rl bind add".cyan()
+        );
+        return Ok(());
+    }
+
+    println!(
+        "{}",
+        format!("{} binding(s) configured:\n", config.bindings.len()).bold()
+    );
+
+    // Group by item.
+    let mut by_item: BTreeMap<&str, Vec<&redlight::config::Binding>> = BTreeMap::new();
+    for b in &config.bindings {
+        by_item.entry(b.item.as_str()).or_default().push(b);
+    }
+
+    for (item_name, bindings) in &by_item {
+        let kind = config
+            .items
+            .get(*item_name)
+            .map(|i| match i.kind {
+                redlight::config::ItemKind::Folder => "folder",
+                redlight::config::ItemKind::File => "file",
+            })
+            .unwrap_or("?");
+        println!("  {} {}", item_name.bold(), format!("({kind})").dimmed());
+
+        let max_dev = bindings.iter().map(|b| b.device.len()).max().unwrap_or(0);
+
+        for b in bindings {
+            let path_display = b.path.as_deref().unwrap_or("(default)");
+            let role = match b.role {
+                redlight::config::Role::ReadWrite => "read_write",
+                redlight::config::Role::ReadOnly => "read_only",
+            };
+            let mut bits = Vec::new();
+            if !b.include.is_empty() {
+                bits.push(format!("include={}", b.include.len()));
+            }
+            if !b.exclude.is_empty() {
+                bits.push(format!("exclude={}", b.exclude.len()));
+            }
+            let filters = if bits.is_empty() {
+                String::new()
+            } else {
+                format!(" · {}", bits.join(" "))
+            };
+
+            println!(
+                "    {:<width$}  → {}  {}{}",
+                b.device.cyan(),
+                path_display.dimmed(),
+                role.dimmed(),
+                filters.dimmed(),
+                width = max_dev,
+            );
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
 fn cmd_doctor() -> Result<()> {
     let dir = config_dir();
     let devices_toml = dir.join("devices.toml");
@@ -709,6 +874,10 @@ fn main() -> Result<()> {
         Some(Command::Item { action }) => match action {
             ItemAction::Add(args) => cmd_item_add(args)?,
             ItemAction::List => cmd_item_list()?,
+        },
+        Some(Command::Bind { action }) => match action {
+            BindAction::Add(args) => cmd_bind_add(args)?,
+            BindAction::List => cmd_bind_list()?,
         },
         None => println!("rl {} — pass --help", redlight::VERSION),
     }
