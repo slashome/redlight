@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 
@@ -22,8 +22,24 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Initialise the config and register the system service.
-    Init,
+    /// Initialise the config directory with a starter host entry.
+    ///
+    /// Creates `~/.config/redlight/devices.toml`, `items.toml`, and
+    /// `bindings.toml`. By default asks two interactive questions
+    /// (short name + free-form description) for the host entry; pass
+    /// `--name` and/or `--description` to skip the prompts.
+    ///
+    /// Does NOT register a system service. Use `brew services start
+    /// redlight` (macOS) or `systemctl --user enable redlight`
+    /// (Linux) after `rl init` to make the daemon start at login.
+    Init {
+        /// Skip the prompt; use this short name for the host entry.
+        #[arg(long)]
+        name: Option<String>,
+        /// Free-form description for the host entry.
+        #[arg(long)]
+        description: Option<String>,
+    },
     /// Start the daemon.
     Start,
     /// Stop the daemon.
@@ -54,6 +70,121 @@ enum Command {
     /// exit (proper signal handler arrives in Phase 4.5/4.6). Phones
     /// aren't detected yet.
     Daemon,
+}
+
+fn default_short_hostname() -> String {
+    gethostname::gethostname()
+        .to_string_lossy()
+        .split('.')
+        .next()
+        .unwrap_or("host")
+        .to_string()
+}
+
+fn prompt(label: &str, default: Option<&str>) -> Result<String> {
+    use std::io::{Write, stdin, stdout};
+    let suffix = match default {
+        Some(d) => format!(" [{}]", d.dimmed()),
+        None => String::new(),
+    };
+    print!("{label}{suffix}: ");
+    stdout().flush()?;
+
+    let mut line = String::new();
+    stdin().read_line(&mut line)?;
+    let trimmed = line.trim();
+    Ok(if trimmed.is_empty() {
+        default.map(String::from).unwrap_or_default()
+    } else {
+        trimmed.to_string()
+    })
+}
+
+fn init_config_files(dir: &Path, name: &str, hostname: &str, description: &str) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+
+    let desc_line = if description.is_empty() {
+        String::new()
+    } else {
+        format!("description = \"{}\"\n", description.replace('"', "\\\""))
+    };
+
+    let devices_content = format!(
+        "[{name}]\n\
+         type = \"host\"\n\
+         bridge = \"fs\"\n\
+         {desc_line}match.hostname = \"{hostname}\"\n"
+    );
+
+    std::fs::write(dir.join("devices.toml"), devices_content)
+        .with_context(|| format!("writing {}", dir.join("devices.toml").display()))?;
+    std::fs::write(dir.join("items.toml"), "")
+        .with_context(|| format!("writing {}", dir.join("items.toml").display()))?;
+    std::fs::write(dir.join("bindings.toml"), "")
+        .with_context(|| format!("writing {}", dir.join("bindings.toml").display()))?;
+
+    Ok(())
+}
+
+fn cmd_init(name_arg: Option<String>, description_arg: Option<String>) -> Result<()> {
+    let dir = config_dir();
+    if dir.join("devices.toml").exists() {
+        bail!(
+            "Config already exists at {}. Edit it manually or remove it first.",
+            dir.display()
+        );
+    }
+
+    println!("{}", "Welcome to Redlight.".bold());
+    println!();
+    println!(
+        "Setting up your config at {}.",
+        dir.display().to_string().dimmed()
+    );
+    println!();
+
+    let full_hostname = gethostname::gethostname().to_string_lossy().into_owned();
+    let default_name = default_short_hostname();
+
+    let name = match name_arg {
+        Some(n) => n,
+        None => prompt("Short name for this machine", Some(&default_name))?,
+    };
+    if name.is_empty() {
+        bail!("name is required");
+    }
+
+    let description = match description_arg {
+        Some(d) => d,
+        None => prompt("Description (optional, free-form)", None)?,
+    };
+
+    init_config_files(&dir, &name, &full_hostname, &description)
+        .with_context(|| format!("writing config to {}", dir.display()))?;
+
+    // Sanity check: it parses.
+    Config::load(&dir).context("the freshly-written config did not parse")?;
+
+    println!();
+    println!("{} Configuration written.", "✓".green());
+    println!();
+    println!("{}", "Next steps:".bold());
+    println!("  {}    declare a phone or drive", "rl device add".cyan());
+    println!("  {}      declare what to sync", "rl item add".cyan());
+    println!("  {}    pair items with devices", "rl bind add".cyan());
+    println!(
+        "  {}        run the watcher in foreground",
+        "rl daemon".cyan()
+    );
+    println!("  {}        check system prerequisites", "rl doctor".cyan());
+    println!();
+    println!(
+        "To start the daemon at login, use {} (macOS) or {} (Linux).",
+        "brew services start redlight".dimmed(),
+        "systemctl --user enable redlight".dimmed()
+    );
+
+    Ok(())
 }
 
 fn cmd_doctor() -> Result<()> {
@@ -236,7 +367,7 @@ fn cmd_daemon() -> Result<()> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Some(Command::Init) => println!("init: not yet implemented"),
+        Some(Command::Init { name, description }) => cmd_init(name, description)?,
         Some(Command::Start) => println!("start: not yet implemented"),
         Some(Command::Stop) => println!("stop: not yet implemented"),
         Some(Command::Status) => println!("status: not yet implemented"),
