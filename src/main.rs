@@ -70,6 +70,53 @@ enum Command {
     /// exit (proper signal handler arrives in Phase 4.5/4.6). Phones
     /// aren't detected yet.
     Daemon,
+    /// Manage devices in the config.
+    Device {
+        #[command(subcommand)]
+        action: DeviceAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum DeviceAction {
+    /// Add a device to devices.toml. Validates the result; reverts if
+    /// the resulting config would be invalid.
+    Add(Box<DeviceAddArgs>),
+    /// List all configured devices.
+    List,
+}
+
+#[derive(clap::Args, Debug)]
+struct DeviceAddArgs {
+    /// Short name for the device (the key in devices.toml).
+    name: String,
+    /// host | phone | drive
+    #[arg(long = "type", value_name = "TYPE")]
+    device_type: String,
+    /// fs | mtp | adb
+    #[arg(long)]
+    bridge: String,
+    /// USB serial (required for phones).
+    #[arg(long)]
+    serial: Option<String>,
+    /// USB vendor ID (hex, e.g. 18d1).
+    #[arg(long)]
+    vendor_id: Option<String>,
+    /// USB product ID.
+    #[arg(long)]
+    product_id: Option<String>,
+    /// Filesystem volume label (drives: at least this or --volume-uuid).
+    #[arg(long)]
+    volume_label: Option<String>,
+    /// Filesystem volume UUID.
+    #[arg(long)]
+    volume_uuid: Option<String>,
+    /// Hostname for multi-host configs.
+    #[arg(long)]
+    hostname: Option<String>,
+    /// Free-form description.
+    #[arg(long)]
+    description: Option<String>,
 }
 
 fn default_short_hostname() -> String {
@@ -184,6 +231,130 @@ fn cmd_init(name_arg: Option<String>, description_arg: Option<String>) -> Result
         "systemctl --user enable redlight".dimmed()
     );
 
+    Ok(())
+}
+
+fn cmd_device_add(args: DeviceAddArgs) -> Result<()> {
+    let dir = config_dir();
+    let path = dir.join("devices.toml");
+    if !path.exists() {
+        bail!("No config found at {}. Run `rl init` first.", dir.display());
+    }
+
+    let original =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+
+    let mut entry = String::new();
+    entry.push_str(&format!("[{}]\n", args.name));
+    entry.push_str(&format!("type = \"{}\"\n", args.device_type));
+    entry.push_str(&format!("bridge = \"{}\"\n", args.bridge));
+    if let Some(d) = &args.description {
+        entry.push_str(&format!("description = \"{}\"\n", d.replace('"', "\\\"")));
+    }
+    for (key, value) in [
+        ("match.vendor_id", &args.vendor_id),
+        ("match.product_id", &args.product_id),
+        ("match.serial", &args.serial),
+        ("match.volume_label", &args.volume_label),
+        ("match.volume_uuid", &args.volume_uuid),
+        ("match.hostname", &args.hostname),
+    ] {
+        if let Some(v) = value {
+            entry.push_str(&format!("{key} = \"{}\"\n", v.replace('"', "\\\"")));
+        }
+    }
+
+    let new_content = if original.trim().is_empty() {
+        entry
+    } else if original.ends_with('\n') {
+        format!("{original}\n{entry}")
+    } else {
+        format!("{original}\n\n{entry}")
+    };
+
+    std::fs::write(&path, &new_content).with_context(|| format!("writing {}", path.display()))?;
+
+    match Config::load(&dir) {
+        Ok(_) => {
+            println!(
+                "{} added device {} to {}.",
+                "✓".green(),
+                args.name.bold(),
+                path.display().to_string().dimmed()
+            );
+            Ok(())
+        }
+        Err(e) => {
+            // Revert.
+            std::fs::write(&path, &original).ok();
+            bail!("config would be invalid, reverted:\n{e}");
+        }
+    }
+}
+
+fn cmd_device_list() -> Result<()> {
+    let dir = config_dir();
+    if !dir.join("devices.toml").exists() {
+        println!("No config found at {}.", dir.display());
+        println!("Run {} to create one.", "rl init".bold());
+        return Ok(());
+    }
+    let config = Config::load(&dir)?;
+
+    if config.devices.is_empty() {
+        println!(
+            "No devices configured. Add some with {}.",
+            "rl device add".cyan()
+        );
+        return Ok(());
+    }
+
+    println!(
+        "{}",
+        format!("{} device(s) configured:\n", config.devices.len()).bold()
+    );
+
+    let name_width = config.devices.keys().map(String::len).max().unwrap_or(0);
+
+    for (name, device) in &config.devices {
+        let m = &device.matcher;
+        let mut matchers = Vec::new();
+        if let Some(v) = &m.vendor_id {
+            matchers.push(format!("vendor_id={v}"));
+        }
+        if let Some(p) = &m.product_id {
+            matchers.push(format!("product_id={p}"));
+        }
+        if let Some(s) = &m.serial {
+            matchers.push(format!("serial={s}"));
+        }
+        if let Some(l) = &m.volume_label {
+            matchers.push(format!("label={l}"));
+        }
+        if let Some(u) = &m.volume_uuid {
+            matchers.push(format!("uuid={u}"));
+        }
+        if let Some(h) = &m.hostname {
+            matchers.push(format!("hostname={h}"));
+        }
+        let matchers_str = if matchers.is_empty() {
+            "—".to_string()
+        } else {
+            matchers.join(" ")
+        };
+
+        println!(
+            "  {:<width$}  {:<6}  bridge {:<3}  {}",
+            name.bold(),
+            device.device_type.to_string().cyan(),
+            device.bridge.to_string().cyan(),
+            matchers_str.dimmed(),
+            width = name_width,
+        );
+        if let Some(d) = &device.description {
+            println!("  {:<width$}    {}", "", d.dimmed(), width = name_width);
+        }
+    }
     Ok(())
 }
 
@@ -377,6 +548,10 @@ fn main() -> Result<()> {
             drive_mount,
         }) => cmd_sync(dry_run, drive_mount)?,
         Some(Command::Daemon) => cmd_daemon()?,
+        Some(Command::Device { action }) => match action {
+            DeviceAction::Add(args) => cmd_device_add(*args)?,
+            DeviceAction::List => cmd_device_list()?,
+        },
         None => println!("rl {} — pass --help", redlight::VERSION),
     }
     Ok(())
