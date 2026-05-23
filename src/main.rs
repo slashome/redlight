@@ -46,6 +46,16 @@ enum Command {
     Stop,
     /// Show daemon and device status.
     Status,
+    /// Show which devices have which files for a given item.
+    ///
+    /// Builds a matrix from the host manifest + per-device snapshots
+    /// (written after every successful sync). Cells:
+    ///   `✓` present, `·` absent, `!` present with diverging hash,
+    ///   `?` device never synced from this host.
+    Ls {
+        /// Item name (must exist in items.toml).
+        item: String,
+    },
     /// Show recent sync activity from the local sync log.
     Log {
         /// Maximum number of entries to show (newest first).
@@ -851,6 +861,137 @@ fn humanize_age(secs: i64) -> String {
     format!("{days}d")
 }
 
+fn cmd_ls(item_name: String) -> Result<()> {
+    use redlight::manifest::{FileEntry, Manifest};
+    use redlight::snapshot;
+    use std::collections::{BTreeSet, HashMap};
+
+    let dir = config_dir();
+    if !dir.join("devices.toml").exists() {
+        println!("No config found at {}.", dir.display());
+        println!("Run {} to create one.", "rl init".bold());
+        return Ok(());
+    }
+    let config = Config::load(&dir)?;
+    if !config.items.contains_key(&item_name) {
+        bail!("item '{}' not declared in items.toml.", item_name);
+    }
+
+    let state = state_dir();
+    let host_manifest_path = dir.join("manifest.toml");
+    let host_manifest = if host_manifest_path.exists() {
+        Some(Manifest::load(&host_manifest_path)?)
+    } else {
+        None
+    };
+    let snaps = snapshot::list(&snapshot::snapshots_dir(&state))?;
+
+    // Columns: every device bound to this item, in config order.
+    let cols: Vec<&str> = config
+        .bindings
+        .iter()
+        .filter(|b| b.item == item_name)
+        .map(|b| b.device.as_str())
+        .collect();
+    if cols.is_empty() {
+        println!("Item '{item_name}' has no bindings yet.");
+        println!("Bind it to a device with {}.", "rl bind add".cyan());
+        return Ok(());
+    }
+
+    // Collect file entries from every available source.
+    let mut device_files: HashMap<&str, &HashMap<String, FileEntry>> = HashMap::new();
+    if let Some(hm) = &host_manifest
+        && let Some(entries) = hm.items.get(&item_name)
+    {
+        device_files.insert(hm.device.as_str(), &entries.files);
+    }
+    for s in &snaps {
+        if let Some(entries) = s.manifest.items.get(&item_name) {
+            device_files.insert(s.device.as_str(), &entries.files);
+        }
+    }
+
+    // Union of all file paths.
+    let mut paths: BTreeSet<&str> = BTreeSet::new();
+    for files in device_files.values() {
+        for k in files.keys() {
+            paths.insert(k.as_str());
+        }
+    }
+    if paths.is_empty() {
+        println!("No files tracked for item '{item_name}' yet.");
+        return Ok(());
+    }
+
+    let path_width = paths.iter().map(|p| p.len()).max().unwrap_or(20).max(20);
+    let col_widths: Vec<usize> = cols.iter().map(|c| c.len().max(3)).collect();
+
+    // Header.
+    print!("{:<path_width$}", "");
+    for (c, w) in cols.iter().zip(&col_widths) {
+        print!("  {}", format!("{c:<w$}").bold());
+    }
+    println!();
+
+    // Rows.
+    let mut diverging = 0usize;
+    for p in &paths {
+        // If every device that has this file agrees on the hash → ✓.
+        // Any disagreement → every present cell gets `!` (no
+        // arbitrary "winner": the user has to investigate).
+        let mut hashes: BTreeSet<&str> = BTreeSet::new();
+        for c in &cols {
+            if let Some(files) = device_files.get(*c)
+                && let Some(fe) = files.get(*p)
+            {
+                hashes.insert(fe.hash.as_str());
+            }
+        }
+        let row_has_divergence = hashes.len() > 1;
+
+        print!("{p:<path_width$}");
+        for (c, w) in cols.iter().zip(&col_widths) {
+            let cell = match device_files.get(*c) {
+                None => "?".dimmed().to_string(),
+                Some(files) => match files.get(*p) {
+                    None => "·".dimmed().to_string(),
+                    Some(_) => {
+                        if row_has_divergence {
+                            "!".yellow().to_string()
+                        } else {
+                            "✓".green().to_string()
+                        }
+                    }
+                },
+            };
+            print!("  {cell:<w$}");
+        }
+        println!();
+        if row_has_divergence {
+            diverging += 1;
+        }
+    }
+
+    println!();
+    let summary = format!(
+        "{} file(s) across {} device(s){}",
+        paths.len(),
+        cols.len(),
+        if diverging > 0 {
+            format!(", {diverging} diverging")
+        } else {
+            String::new()
+        }
+    );
+    if diverging > 0 {
+        println!("{}", summary.yellow());
+    } else {
+        println!("{}", summary.dimmed());
+    }
+    Ok(())
+}
+
 fn cmd_log(
     limit: usize,
     device: Option<String>,
@@ -1140,6 +1281,7 @@ fn main() -> Result<()> {
         Some(Command::Start) => println!("start: not yet implemented"),
         Some(Command::Stop) => println!("stop: not yet implemented"),
         Some(Command::Status) => cmd_status()?,
+        Some(Command::Ls { item }) => cmd_ls(item)?,
         Some(Command::Log {
             limit,
             device,
