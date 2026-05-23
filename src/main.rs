@@ -75,6 +75,11 @@ enum Command {
         #[command(subcommand)]
         action: DeviceAction,
     },
+    /// Manage items in the config.
+    Item {
+        #[command(subcommand)]
+        action: ItemAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -84,6 +89,35 @@ enum DeviceAction {
     Add(Box<DeviceAddArgs>),
     /// List all configured devices.
     List,
+}
+
+#[derive(Subcommand)]
+enum ItemAction {
+    /// Add an item to items.toml. Reverts on validation error.
+    Add(ItemAddArgs),
+    /// List all configured items.
+    List,
+}
+
+#[derive(clap::Args, Debug)]
+struct ItemAddArgs {
+    /// Short name for the item (the key in items.toml).
+    name: String,
+    /// folder | file
+    #[arg(long)]
+    kind: String,
+    /// Free-form tag.
+    #[arg(long)]
+    category: Option<String>,
+    /// Free-form description.
+    #[arg(long)]
+    description: Option<String>,
+    /// Allowlist glob pattern. Repeatable: `--include "**/*.mp3" --include "**/*.flac"`.
+    #[arg(long)]
+    include: Vec<String>,
+    /// Denylist glob pattern. Repeatable.
+    #[arg(long)]
+    exclude: Vec<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -287,7 +321,7 @@ fn cmd_device_add(args: DeviceAddArgs) -> Result<()> {
         Err(e) => {
             // Revert.
             std::fs::write(&path, &original).ok();
-            bail!("config would be invalid, reverted:\n{e}");
+            bail!("config would be invalid, reverted:\n{e:#}");
         }
     }
 }
@@ -352,6 +386,126 @@ fn cmd_device_list() -> Result<()> {
             width = name_width,
         );
         if let Some(d) = &device.description {
+            println!("  {:<width$}    {}", "", d.dimmed(), width = name_width);
+        }
+    }
+    Ok(())
+}
+
+fn toml_string_array(patterns: &[String]) -> String {
+    let escaped: Vec<String> = patterns
+        .iter()
+        .map(|p| format!("\"{}\"", p.replace('\\', "\\\\").replace('"', "\\\"")))
+        .collect();
+    format!("[{}]", escaped.join(", "))
+}
+
+fn cmd_item_add(args: ItemAddArgs) -> Result<()> {
+    let dir = config_dir();
+    let path = dir.join("items.toml");
+    if !path.exists() {
+        bail!("No config found at {}. Run `rl init` first.", dir.display());
+    }
+
+    let original =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+
+    let mut entry = String::new();
+    entry.push_str(&format!("[{}]\n", args.name));
+    entry.push_str(&format!("kind = \"{}\"\n", args.kind));
+    if let Some(c) = &args.category {
+        entry.push_str(&format!("category = \"{}\"\n", c.replace('"', "\\\"")));
+    }
+    if let Some(d) = &args.description {
+        entry.push_str(&format!("description = \"{}\"\n", d.replace('"', "\\\"")));
+    }
+    if !args.include.is_empty() {
+        entry.push_str(&format!("include = {}\n", toml_string_array(&args.include)));
+    }
+    if !args.exclude.is_empty() {
+        entry.push_str(&format!("exclude = {}\n", toml_string_array(&args.exclude)));
+    }
+
+    let new_content = if original.trim().is_empty() {
+        entry
+    } else if original.ends_with('\n') {
+        format!("{original}\n{entry}")
+    } else {
+        format!("{original}\n\n{entry}")
+    };
+
+    std::fs::write(&path, &new_content).with_context(|| format!("writing {}", path.display()))?;
+
+    match Config::load(&dir) {
+        Ok(_) => {
+            println!(
+                "{} added item {} to {}.",
+                "✓".green(),
+                args.name.bold(),
+                path.display().to_string().dimmed()
+            );
+            Ok(())
+        }
+        Err(e) => {
+            std::fs::write(&path, &original).ok();
+            bail!("config would be invalid, reverted:\n{e:#}");
+        }
+    }
+}
+
+fn cmd_item_list() -> Result<()> {
+    let dir = config_dir();
+    if !dir.join("items.toml").exists() {
+        println!("No config found at {}.", dir.display());
+        println!("Run {} to create one.", "rl init".bold());
+        return Ok(());
+    }
+    let config = Config::load(&dir)?;
+
+    if config.items.is_empty() {
+        println!(
+            "No items configured. Add some with {}.",
+            "rl item add".cyan()
+        );
+        return Ok(());
+    }
+
+    println!(
+        "{}",
+        format!("{} item(s) configured:\n", config.items.len()).bold()
+    );
+
+    let name_width = config.items.keys().map(String::len).max().unwrap_or(0);
+
+    for (name, item) in &config.items {
+        let kind = match item.kind {
+            redlight::config::ItemKind::Folder => "folder",
+            redlight::config::ItemKind::File => "file",
+        };
+        let mut bits = Vec::new();
+        if !item.include.is_empty() {
+            bits.push(format!("include={}", item.include.len()));
+        }
+        if !item.exclude.is_empty() {
+            bits.push(format!("exclude={}", item.exclude.len()));
+        }
+        if let Some(c) = &item.category {
+            bits.push(format!("category={c}"));
+        }
+        let suffix = if bits.is_empty() {
+            "—".to_string()
+        } else {
+            bits.join(" ")
+        };
+
+        println!(
+            "  {:<width$}  {:<6}  {}",
+            name.bold(),
+            kind.cyan(),
+            suffix.dimmed(),
+            width = name_width,
+        );
+        if let Some(d) = &item.description {
             println!("  {:<width$}    {}", "", d.dimmed(), width = name_width);
         }
     }
@@ -551,6 +705,10 @@ fn main() -> Result<()> {
         Some(Command::Device { action }) => match action {
             DeviceAction::Add(args) => cmd_device_add(*args)?,
             DeviceAction::List => cmd_device_list()?,
+        },
+        Some(Command::Item { action }) => match action {
+            ItemAction::Add(args) => cmd_item_add(args)?,
+            ItemAction::List => cmd_item_list()?,
         },
         None => println!("rl {} — pass --help", redlight::VERSION),
     }
