@@ -358,21 +358,25 @@ last_sync = 1715000100
 ## Phase 5 — CLI `rl`
 
 ### 5.1 Framework
-- [ ] `clap` derive API: top-level enum + nested subcommand enums for `device`, `item`, `bind`
-- [ ] Top-level: `init`, `start`, `stop`, `status`, `sync`, `log`, `manifest`
-- [ ] Binary declared in `Cargo.toml` (`[[bin]] name = "rl"`)
-- [ ] Contextual help everywhere (clap auto-generated)
+- [x] `clap` derive API: top-level enum + nested subcommand enums for `device`, `item`, `bind`
+- [x] Top-level: `init`, `status`, `sync`, `daemon`, `doctor`, `log`, `ls`
+- [x] Binary declared in `Cargo.toml` (`[[bin]] name = "rl"`)
+- [x] Contextual help everywhere (clap auto-generated)
+- [ ] `--item NAME` / `--device NAME` filters on `rl sync` (deferred — single-item sync is rare)
+- [ ] `rl start` / `rl stop` / `rl restart` — covered by brew services / systemctl per Phase 7 convention; binary itself never registers a service
 
 ### 5.2 Commands
-- [ ] `rl init` — create config skeleton, install launchd plist, check libmtp, start daemon
-- [ ] `rl start` / `rl stop` / `rl restart`
-- [ ] `rl status` — daemon state, connected devices, last sync per binding
-- [ ] `rl device add|remove|list` — manage devices
-- [ ] `rl item add|remove|list` — manage item definitions, including include/exclude
-- [ ] `rl bind add|remove|list` — manage (item × device) pairs and roles
-- [ ] `rl sync [--dry-run] [--item NAME] [--device NAME]` — force sync
-- [ ] `rl log [--errors] [--device NAME] [--item NAME] [--tail N]`
-- [ ] `rl manifest [--device NAME] [--item NAME]`
+- [x] `rl init` — create config skeleton (host entry only). Service registration left to brew/systemd per platform convention.
+- [x] `rl status` — host + per-device snapshots with last-seen timestamps
+- [x] `rl device add|remove|list` — manage devices (remove refuses to cascade)
+- [x] `rl item add|remove|list` — manage item definitions, including include/exclude
+- [x] `rl bind add|remove|list` — manage (item × device) pairs and roles
+- [x] `rl sync [--dry-run] [--drive-mount NAME=PATH]` — force sync
+- [x] `rl log [--errors] [--device NAME] [--item NAME] [--limit N]`
+- [x] `rl ls <item>` — cross-device file matrix (host manifest + snapshots)
+- [x] `rl doctor` — bridge prerequisites (jmtpfs, adb)
+- [x] `rl daemon` — run watcher loop in foreground
+- [ ] `rl manifest [--device NAME] [--item NAME]` — covered by `rl ls` + snapshot files on disk; explicit dump command deferred
 
 ---
 
