@@ -46,6 +46,21 @@ enum Command {
     Stop,
     /// Show daemon and device status.
     Status,
+    /// Show recent sync activity from the local sync log.
+    Log {
+        /// Maximum number of entries to show (newest first).
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Only show entries for this device.
+        #[arg(long)]
+        device: Option<String>,
+        /// Only show entries for this item.
+        #[arg(long)]
+        item: Option<String>,
+        /// Only show warnings and errors.
+        #[arg(long)]
+        errors: bool,
+    },
     /// Verify that system prerequisites (jmtpfs, adb…) are available for
     /// each configured device.
     Doctor,
@@ -836,6 +851,109 @@ fn humanize_age(secs: i64) -> String {
     format!("{days}d")
 }
 
+fn cmd_log(
+    limit: usize,
+    device: Option<String>,
+    item: Option<String>,
+    errors_only: bool,
+) -> Result<()> {
+    use redlight::sync_log::{LogLevel, Operation, SyncLog};
+
+    let log_path = state_dir().join("sync_log.toml");
+    if !log_path.exists() {
+        println!("No sync log yet at {}.", log_path.display());
+        println!("Run {} or {} first.", "rl sync".bold(), "rl daemon".bold());
+        return Ok(());
+    }
+    let log = SyncLog::open(&log_path)?;
+
+    let mut entries: Vec<_> = log
+        .entries()
+        .iter()
+        .filter(|e| device.as_deref().is_none_or(|d| e.device == d))
+        .filter(|e| item.as_deref().is_none_or(|i| e.item == i))
+        .filter(|e| !errors_only || matches!(e.level, LogLevel::Warning | LogLevel::Error))
+        .collect();
+    // Newest first.
+    entries.reverse();
+    entries.truncate(limit);
+
+    if entries.is_empty() {
+        println!("No matching log entries.");
+        return Ok(());
+    }
+
+    let max_dev = entries.iter().map(|e| e.device.len()).max().unwrap_or(0);
+    let max_item = entries.iter().map(|e| e.item.len()).max().unwrap_or(0);
+
+    for e in entries.iter().rev() {
+        let icon = match e.level {
+            LogLevel::Info => "✓".green(),
+            LogLevel::Warning => "⚠".yellow(),
+            LogLevel::Error => "✗".red(),
+        };
+        let op = match e.operation {
+            Operation::Create => "create",
+            Operation::Update => "update",
+            Operation::Delete => "delete",
+            Operation::Skip => "skip",
+        };
+        let ts = format_utc_ts(e.timestamp);
+        let err = e
+            .error
+            .as_deref()
+            .map(|s| format!("  ({s})").red().to_string())
+            .unwrap_or_default();
+        println!(
+            "{}  {} {:<6}  {:<dwidth$}  {:<iwidth$}  {}{}",
+            ts.dimmed(),
+            icon,
+            op,
+            e.device.cyan(),
+            e.item.dimmed(),
+            e.file,
+            err,
+            dwidth = max_dev,
+            iwidth = max_item,
+        );
+    }
+    Ok(())
+}
+
+/// Format a unix timestamp as `YYYY-MM-DD HH:MM` in UTC.
+///
+/// We render in UTC (with the `Z` suffix elided for compactness) to
+/// avoid pulling chrono / time-tz just for the log viewer. Local
+/// timezone display is on the deferred list — see PLAN.md.
+fn format_utc_ts(ts: i64) -> String {
+    // Days since epoch + remainder seconds. Same algorithm as
+    // chrono::NaiveDateTime::from_timestamp_opt — accurate for the
+    // Gregorian range we care about.
+    if ts <= 0 {
+        return "(unknown)".into();
+    }
+    let secs = ts;
+    let days = secs / 86_400;
+    let rem = secs % 86_400;
+    let h = rem / 3600;
+    let m = (rem % 3600) / 60;
+
+    // Days → calendar date via the algorithm from Howard Hinnant's
+    // "date" library (public domain), shifted from 1970-01-01.
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if mo <= 2 { y + 1 } else { y };
+
+    format!("{year:04}-{mo:02}-{d:02} {h:02}:{m:02}")
+}
+
 fn cmd_doctor() -> Result<()> {
     let dir = config_dir();
     let devices_toml = dir.join("devices.toml");
@@ -1022,6 +1140,12 @@ fn main() -> Result<()> {
         Some(Command::Start) => println!("start: not yet implemented"),
         Some(Command::Stop) => println!("stop: not yet implemented"),
         Some(Command::Status) => cmd_status()?,
+        Some(Command::Log {
+            limit,
+            device,
+            item,
+            errors,
+        }) => cmd_log(limit, device, item, errors)?,
         Some(Command::Doctor) => cmd_doctor()?,
         Some(Command::Sync {
             dry_run,
@@ -1043,4 +1167,31 @@ fn main() -> Result<()> {
         None => println!("rl {} — pass --help", redlight::VERSION),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_utc_ts_unix_epoch() {
+        assert_eq!(format_utc_ts(0), "(unknown)");
+    }
+
+    #[test]
+    fn format_utc_ts_known_dates() {
+        // 2024-01-01 00:00:00 UTC = 1704067200
+        assert_eq!(format_utc_ts(1_704_067_200), "2024-01-01 00:00");
+        // 2026-05-23 08:34:56 UTC = 1779525296
+        assert_eq!(format_utc_ts(1_779_525_296), "2026-05-23 08:34");
+        // Y2K → 2000-01-01 00:00:00 UTC = 946684800
+        assert_eq!(format_utc_ts(946_684_800), "2000-01-01 00:00");
+        // End of February in a leap year → 2024-02-29
+        assert_eq!(format_utc_ts(1_709_164_800), "2024-02-29 00:00");
+    }
+
+    #[test]
+    fn format_utc_ts_negative_is_unknown() {
+        assert_eq!(format_utc_ts(-1), "(unknown)");
+    }
 }
