@@ -173,12 +173,16 @@ mod tests {
                 device: "tardis".into(),
                 path: Some(host_root.to_string_lossy().into_owned()),
                 role: Role::ReadWrite,
+                include: vec![],
+                exclude: vec![],
             },
             Binding {
                 item: "music".into(),
                 device: "materia".into(),
                 path: None,
                 role: Role::ReadWrite,
+                include: vec![],
+                exclude: vec![],
             },
         ];
 

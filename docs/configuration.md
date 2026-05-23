@@ -150,6 +150,8 @@ role = "read_write"
 | `device` | string | oui | nom d'un device déclaré dans `devices.toml` |
 | `path` | string | non | chemin sur le device (voir défauts ci-dessous) |
 | `role` | `"read_write"` \| `"read_only"` | oui | participation à la sync |
+| `include` | liste de globs | non | allowlist spécifique au device (intersection avec l'item) |
+| `exclude` | liste de globs | non | denylist spécifique au device (union avec l'item) |
 
 ### Roles
 
@@ -166,6 +168,49 @@ Si `path` est absent :
 - **phone** → `/storage/emulated/0/` (racine du stockage utilisateur Android)
 
 Binder à la racine d'un device est tout à fait légitime (voir l'exemple "clé USB" ci-dessous) — les exclusions automatiques empêchent le bookkeeping Redlight de polluer le binding.
+
+### Filtres par binding
+
+Les `include` / `exclude` peuvent vivre **à deux niveaux** :
+
+- **Au niveau de l'item** (`items.toml`) : définissent ce qu'est l'item en général, partagé par tous les devices qui le bindent.
+- **Au niveau du binding** (`bindings.toml`) : restreignent **spécifiquement** ce qui va sur ce device.
+
+Combinaison :
+- **Includes** : un fichier passe ssi il matche un pattern de l'item **ET** un pattern du binding (si non vides chacun). C'est une **intersection**.
+- **Excludes** : un fichier est bloqué si **n'importe quel** pattern (item, binding ou système) matche. C'est une **union**.
+
+Cas d'usage typique : tu as une collection musique complète sur tardis/hal9000/materia, mais tu veux **un sous-ensemble** sur jarvis (le téléphone manque de place pour tout) :
+
+```toml
+# items.toml
+[music]
+kind = "folder"
+include = ["**/*.mp3", "**/*.flac"]   # ce qu'est "music"
+
+# bindings.toml
+[[binding]]
+item = "music"
+device = "jarvis"
+path = "/storage/emulated/0/Music"
+role = "read_only"
+include = [                            # subset spécifique au phone
+  "**/Beatles/**",
+  "**/Daft Punk/**",
+  "**/Top hits 2024/**",
+  "**/Favorites/**",
+]
+```
+
+Effet sur jarvis : seuls les fichiers qui matchent `(*.mp3 OU *.flac) ET (sous Beatles/Daft Punk/Top hits 2024/Favorites)` sont synchronisés. Sur tardis/hal9000/materia (sans `include` binding), toute la musique reste synchronisée normalement.
+
+Tu peux aussi exclure ponctuellement, ex. tu veux toute la musique sur jarvis sauf audiobooks :
+```toml
+[[binding]]
+item = "music"
+device = "jarvis"
+exclude = ["**/Audiobooks/**", "**/Podcasts/**"]
+```
 
 ### Règles de validation
 

@@ -175,6 +175,8 @@ mod tests {
             device: device.into(),
             path: None,
             role,
+            include: vec![],
+            exclude: vec![],
         }
     }
 

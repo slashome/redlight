@@ -144,6 +144,16 @@ pub struct Binding {
     #[serde(default)]
     pub path: Option<String>,
     pub role: Role,
+    /// Extra include patterns specific to this device. Combined by
+    /// intersection with the item's `include`: a file passes only if
+    /// it matches both. Empty = no binding-level narrowing.
+    #[serde(default)]
+    pub include: Vec<String>,
+    /// Extra exclude patterns specific to this device. Combined by
+    /// union with the item's `exclude` and the system excludes: any
+    /// match blocks the file. Empty = no binding-level additions.
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -437,6 +447,8 @@ mod tests {
                 device: "tardis".into(),
                 path: Some("~/Music".into()),
                 role: Role::ReadWrite,
+                include: vec![],
+                exclude: vec![],
             }],
         }
     }
@@ -564,6 +576,8 @@ role = "owner"
             device: "ghost".into(),
             path: None,
             role: Role::ReadWrite,
+            include: vec![],
+            exclude: vec![],
         });
         let err = cfg.validate().unwrap_err().to_string();
         assert!(err.contains("unknown device 'ghost'"));
@@ -577,6 +591,8 @@ role = "owner"
             device: "tardis".into(),
             path: None,
             role: Role::ReadWrite,
+            include: vec![],
+            exclude: vec![],
         });
         let err = cfg.validate().unwrap_err().to_string();
         assert!(err.contains("unknown item 'ghost'"));
@@ -662,6 +678,8 @@ role = "owner"
             device: "materia".into(),
             path: Some("/".into()),
             role: Role::ReadWrite,
+            include: vec![],
+            exclude: vec![],
         });
         cfg.validate().unwrap();
     }
@@ -675,6 +693,8 @@ role = "owner"
             device: "materia".into(),
             path: None,
             role: Role::ReadWrite,
+            include: vec![],
+            exclude: vec![],
         });
         cfg.validate().unwrap();
     }
@@ -689,6 +709,8 @@ role = "owner"
             device: "tardis".into(),
             path: Some("~/Other".into()),
             role: Role::ReadOnly,
+            include: vec![],
+            exclude: vec![],
         });
         let err = cfg.validate().unwrap_err().to_string();
         assert!(
@@ -708,6 +730,8 @@ role = "owner"
             device: "tardis".into(),
             path: None,
             role: Role::ReadWrite,
+            include: vec![],
+            exclude: vec![],
         }); // unknown item
 
         let err = cfg.validate().unwrap_err().to_string();
@@ -759,6 +783,8 @@ role = "owner"
             device: "jarvis".into(),
             path: Some("/Music".into()),
             role: Role::ReadOnly,
+            include: vec![],
+            exclude: vec![],
         };
         assert_eq!(binding.resolved_path(&device), PathBuf::from("/Music"));
     }
@@ -771,6 +797,8 @@ role = "owner"
             device: "jarvis".into(),
             path: None,
             role: Role::ReadOnly,
+            include: vec![],
+            exclude: vec![],
         };
         assert_eq!(
             binding.resolved_path(&device),
@@ -786,6 +814,8 @@ role = "owner"
             device: "materia".into(),
             path: None,
             role: Role::ReadWrite,
+            include: vec![],
+            exclude: vec![],
         };
         assert_eq!(binding.resolved_path(&device), PathBuf::from("/"));
     }

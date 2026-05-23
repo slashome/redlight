@@ -75,7 +75,7 @@ pub fn compute_diff(
         .unwrap_or(&empty);
 
     let changes = match item.kind {
-        ItemKind::Folder => folder_changes(bridge, &root, item, manifest_entries)?,
+        ItemKind::Folder => folder_changes(bridge, &root, item, binding, manifest_entries)?,
         ItemKind::File => file_changes(bridge, &root, manifest_entries)?,
     };
 
@@ -90,11 +90,17 @@ fn folder_changes(
     bridge: &dyn Bridge,
     root: &Path,
     item: &Item,
+    binding: &Binding,
     manifest_entries: &HashMap<String, FileEntry>,
 ) -> Result<Vec<FileChange>> {
     let live = bridge.list_files(root)?;
-    let filters = Filters::compile(&item.include, &item.exclude)
-        .with_context(|| format!("compiling filters for item '{}'", item.name))?;
+    let filters = Filters::compile(
+        &item.include,
+        &item.exclude,
+        &binding.include,
+        &binding.exclude,
+    )
+    .with_context(|| format!("compiling filters for item '{}'", item.name))?;
     let live: Vec<_> = live
         .into_iter()
         .filter(|f| filters.allow(&f.path))
@@ -207,29 +213,51 @@ pub const SYSTEM_EXCLUDES: &[&str] = &[
 ];
 
 struct Filters {
-    /// Non-empty include set: file must match at least one.
-    include: Option<GlobSet>,
-    /// Exclude set: file must not match any. Always non-empty because
-    /// it carries [`SYSTEM_EXCLUDES`] plus the user-supplied patterns.
+    /// Item-level allowlist. None = item doesn't restrict.
+    item_include: Option<GlobSet>,
+    /// Binding-level allowlist. None = binding doesn't narrow further.
+    /// Combined by intersection with `item_include`.
+    binding_include: Option<GlobSet>,
+    /// Union of [`SYSTEM_EXCLUDES`] + item.exclude + binding.exclude.
+    /// Any match blocks the file.
     exclude: GlobSet,
 }
 
 impl Filters {
-    fn compile(include: &[String], exclude: &[String]) -> Result<Self> {
-        let include = if include.is_empty() {
+    fn compile(
+        item_include: &[String],
+        item_exclude: &[String],
+        binding_include: &[String],
+        binding_exclude: &[String],
+    ) -> Result<Self> {
+        let item_include = if item_include.is_empty() {
             None
         } else {
-            Some(build_set(include)?)
+            Some(build_set(item_include)?)
+        };
+        let binding_include = if binding_include.is_empty() {
+            None
+        } else {
+            Some(build_set(binding_include)?)
         };
         let mut excludes: Vec<&str> = SYSTEM_EXCLUDES.to_vec();
-        let user_excludes: Vec<&str> = exclude.iter().map(String::as_str).collect();
-        excludes.extend(user_excludes);
+        excludes.extend(item_exclude.iter().map(String::as_str));
+        excludes.extend(binding_exclude.iter().map(String::as_str));
         let exclude = build_set_str(&excludes)?;
-        Ok(Self { include, exclude })
+        Ok(Self {
+            item_include,
+            binding_include,
+            exclude,
+        })
     }
 
     fn allow(&self, path: &Path) -> bool {
-        if let Some(inc) = &self.include
+        if let Some(inc) = &self.item_include
+            && !inc.is_match(path)
+        {
+            return false;
+        }
+        if let Some(inc) = &self.binding_include
             && !inc.is_match(path)
         {
             return false;
@@ -319,6 +347,8 @@ mod tests {
             device: device.into(),
             path: path.map(String::from),
             role: Role::ReadWrite,
+            include: vec![],
+            exclude: vec![],
         }
     }
 
@@ -587,6 +617,151 @@ mod tests {
     }
 
     // ---- glob compile errors ----
+
+    // ---- binding-level filters ----
+
+    fn binding_with_filters(
+        item: &str,
+        device: &str,
+        include: &[&str],
+        exclude: &[&str],
+    ) -> Binding {
+        Binding {
+            item: item.into(),
+            device: device.into(),
+            path: None,
+            role: Role::ReadWrite,
+            include: include.iter().map(|s| s.to_string()).collect(),
+            exclude: exclude.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn binding_include_narrows_item_include_by_intersection() {
+        // Item allows all mp3 + flac; binding restricts to Beatles dir only.
+        let tmp = TempDir::new().unwrap();
+        let bridge = FsBridge::at_mount(tmp.path());
+        touch(tmp.path(), "Beatles/Help.mp3", "h");
+        touch(tmp.path(), "Beatles/Yesterday.flac", "y");
+        touch(tmp.path(), "Daft Punk/One More Time.mp3", "o");
+        touch(tmp.path(), "Classical/Bach.mp3", "b");
+
+        let device = make_drive("jarvis-like");
+        let item = make_item("music", ItemKind::Folder, &["**/*.mp3", "**/*.flac"], &[]);
+        let binding = binding_with_filters("music", "jarvis-like", &["**/Beatles/**"], &[]);
+        let manifest = Manifest::new("jarvis-like");
+
+        let diff = compute_diff(&bridge, &binding, &item, &device, &manifest).unwrap();
+        let paths: BTreeSet<_> = diff
+            .changes
+            .iter()
+            .map(|c| c.path().to_path_buf())
+            .collect();
+        assert_eq!(
+            paths,
+            BTreeSet::from([
+                PathBuf::from("Beatles/Help.mp3"),
+                PathBuf::from("Beatles/Yesterday.flac"),
+            ])
+        );
+    }
+
+    #[test]
+    fn binding_exclude_adds_to_item_exclude() {
+        // Item excludes draft-*; binding additionally excludes Audiobooks.
+        let tmp = TempDir::new().unwrap();
+        let bridge = FsBridge::at_mount(tmp.path());
+        touch(tmp.path(), "song.mp3", "a");
+        touch(tmp.path(), "draft-take.mp3", "b");
+        touch(tmp.path(), "Audiobooks/book.mp3", "c");
+
+        let device = make_drive("jarvis-like");
+        let item = make_item("music", ItemKind::Folder, &[], &["**/draft-*"]);
+        let binding = binding_with_filters("music", "jarvis-like", &[], &["**/Audiobooks/**"]);
+        let manifest = Manifest::new("jarvis-like");
+
+        let diff = compute_diff(&bridge, &binding, &item, &device, &manifest).unwrap();
+        let paths: BTreeSet<_> = diff
+            .changes
+            .iter()
+            .map(|c| c.path().to_path_buf())
+            .collect();
+        assert_eq!(paths, BTreeSet::from([PathBuf::from("song.mp3")]));
+    }
+
+    #[test]
+    fn binding_include_and_exclude_combine() {
+        let tmp = TempDir::new().unwrap();
+        let bridge = FsBridge::at_mount(tmp.path());
+        touch(tmp.path(), "Beatles/Help.mp3", "1");
+        touch(tmp.path(), "Beatles/draft-Help.mp3", "2"); // matches binding include but item-excluded
+        touch(tmp.path(), "Beatles/Audiobook.mp3", "3"); // matches binding include but binding-excluded
+        touch(tmp.path(), "Daft Punk/One.mp3", "4"); // not in binding include
+
+        let device = make_drive("jarvis-like");
+        let item = make_item("music", ItemKind::Folder, &["**/*.mp3"], &["**/draft-*"]);
+        let binding = binding_with_filters(
+            "music",
+            "jarvis-like",
+            &["**/Beatles/**"],
+            &["**/Audiobook*"],
+        );
+        let manifest = Manifest::new("jarvis-like");
+
+        let diff = compute_diff(&bridge, &binding, &item, &device, &manifest).unwrap();
+        let paths: BTreeSet<_> = diff
+            .changes
+            .iter()
+            .map(|c| c.path().to_path_buf())
+            .collect();
+        assert_eq!(paths, BTreeSet::from([PathBuf::from("Beatles/Help.mp3")]));
+    }
+
+    #[test]
+    fn empty_binding_filters_preserve_item_filters() {
+        // Backwards compat: a binding with no include/exclude behaves as
+        // if those fields didn't exist.
+        let tmp = TempDir::new().unwrap();
+        let bridge = FsBridge::at_mount(tmp.path());
+        touch(tmp.path(), "song.mp3", "a");
+        touch(tmp.path(), "song.wav", "b");
+
+        let device = make_drive("any");
+        let item = make_item("music", ItemKind::Folder, &["**/*.mp3"], &[]);
+        let binding = binding_with_filters("music", "any", &[], &[]);
+        let manifest = Manifest::new("any");
+
+        let diff = compute_diff(&bridge, &binding, &item, &device, &manifest).unwrap();
+        let paths: BTreeSet<_> = diff
+            .changes
+            .iter()
+            .map(|c| c.path().to_path_buf())
+            .collect();
+        assert_eq!(paths, BTreeSet::from([PathBuf::from("song.mp3")]));
+    }
+
+    #[test]
+    fn binding_include_alone_works_when_item_has_no_include() {
+        // Item is wide open (no include); binding alone restricts.
+        let tmp = TempDir::new().unwrap();
+        let bridge = FsBridge::at_mount(tmp.path());
+        touch(tmp.path(), "ok.mp3", "a");
+        touch(tmp.path(), "Special/keeper.txt", "b");
+        touch(tmp.path(), "random.txt", "c");
+
+        let device = make_drive("any");
+        let item = make_item("anything", ItemKind::Folder, &[], &[]);
+        let binding = binding_with_filters("anything", "any", &["**/Special/**"], &[]);
+        let manifest = Manifest::new("any");
+
+        let diff = compute_diff(&bridge, &binding, &item, &device, &manifest).unwrap();
+        let paths: BTreeSet<_> = diff
+            .changes
+            .iter()
+            .map(|c| c.path().to_path_buf())
+            .collect();
+        assert_eq!(paths, BTreeSet::from([PathBuf::from("Special/keeper.txt")]));
+    }
 
     // ---- system excludes ----
 
