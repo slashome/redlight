@@ -6,6 +6,7 @@ pub mod bridges;
 pub mod config;
 pub mod daemon;
 pub mod manifest;
+pub mod snapshot;
 pub mod sync;
 pub mod sync_log;
 pub mod watcher;

@@ -32,6 +32,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub struct DaemonOpts {
     pub host_manifest_path: PathBuf,
     pub log_path: PathBuf,
+    /// Where to write per-device snapshots after each sync.
+    /// `None` disables snapshot writing (useful for tests).
+    pub snapshots_dir: Option<PathBuf>,
     pub stop: Arc<AtomicBool>,
 }
 
@@ -55,6 +58,7 @@ pub fn handle_event(
     drive_mounts: &mut HashMap<String, PathBuf>,
     host_manifest_path: &Path,
     log_path: &Path,
+    snapshots_dir: Option<&Path>,
 ) -> Result<EventOutcome> {
     match event {
         DeviceEvent::Connected {
@@ -73,6 +77,7 @@ pub fn handle_event(
             let sync_opts = SyncOpts {
                 dry_run: false,
                 drive_mounts: drive_mounts.clone(),
+                snapshots_dir: snapshots_dir.map(PathBuf::from),
             };
             let summary = run_sync(config, host_manifest_path, log_path, &sync_opts)?;
             println!(
@@ -104,6 +109,7 @@ pub fn run<W: Watcher>(config: &Config, mut watcher: W, opts: &DaemonOpts) -> Re
                 &mut drive_mounts,
                 &opts.host_manifest_path,
                 &opts.log_path,
+                opts.snapshots_dir.as_deref(),
             ) {
                 eprintln!("{} event handling failed: {e}", "✗".red());
             }
@@ -226,6 +232,7 @@ mod tests {
             &mut drive_mounts,
             &state_dir.path().join("manifest.toml"),
             &state_dir.path().join("sync_log.toml"),
+            None,
         )
         .unwrap();
 
@@ -266,6 +273,7 @@ mod tests {
             &mut drive_mounts,
             &state_dir.path().join("manifest.toml"),
             &state_dir.path().join("sync_log.toml"),
+            None,
         )
         .unwrap();
 
@@ -295,6 +303,7 @@ mod tests {
             &mut drive_mounts,
             &state_dir.path().join("manifest.toml"),
             &state_dir.path().join("sync_log.toml"),
+            None,
         )
         .unwrap();
 
@@ -313,6 +322,7 @@ mod tests {
         let opts = DaemonOpts {
             host_manifest_path: state_dir.path().join("manifest.toml"),
             log_path: state_dir.path().join("sync_log.toml"),
+            snapshots_dir: None,
             stop: Arc::new(AtomicBool::new(true)),
         };
         run(&cfg, watcher, &opts).unwrap();

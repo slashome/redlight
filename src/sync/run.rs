@@ -24,6 +24,7 @@ use colored::Colorize;
 use crate::bridges::{Bridge, FsBridge, ensure_bootstrap};
 use crate::config::{Binding, Config, Device, DeviceType, Item};
 use crate::manifest::Manifest;
+use crate::snapshot::Snapshot;
 use crate::sync_log::SyncLog;
 
 use super::diff::compute_diff;
@@ -40,6 +41,10 @@ pub struct SyncOpts {
     /// absent for a device, the orchestrator falls back to
     /// `/Volumes/<label>` (macOS) or `/media/<label>` (Linux).
     pub drive_mounts: HashMap<String, PathBuf>,
+    /// When set, after each successful (non-dry-run) pair sync, write a
+    /// [`Snapshot`] of the passive device's manifest into this directory.
+    /// `rl status` reads these to show offline devices.
+    pub snapshots_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Default)]
@@ -219,6 +224,12 @@ fn sync_host_with_drive(
         drive_bridge
             .write_text(Path::new(PASSIVE_MANIFEST_PATH), &s)
             .context("saving drive manifest")?;
+
+        if let Some(snap_dir) = &opts.snapshots_dir {
+            Snapshot::new(drive_manifest.clone(), &host.name)
+                .save(snap_dir)
+                .with_context(|| format!("saving snapshot to {}", snap_dir.display()))?;
+        }
     }
 
     Ok(())
@@ -414,6 +425,7 @@ mod tests {
         let opts = SyncOpts {
             dry_run: false,
             drive_mounts: HashMap::from([("materia".into(), drive_dir.path().to_path_buf())]),
+            snapshots_dir: None,
         };
         let summary = run_sync(
             &cfg,
@@ -433,6 +445,64 @@ mod tests {
     }
 
     #[test]
+    fn sync_writes_drive_snapshot_when_snapshots_dir_set() {
+        use crate::snapshot::Snapshot;
+
+        let host_dir = TempDir::new().unwrap();
+        let drive_dir = TempDir::new().unwrap();
+        let config_dir = TempDir::new().unwrap();
+        let snap_dir = TempDir::new().unwrap();
+
+        touch(&host_dir.path().join("song.mp3"), "hello");
+
+        let cfg = make_config(host_dir.path(), "MATERIA");
+        let opts = SyncOpts {
+            dry_run: false,
+            drive_mounts: HashMap::from([("materia".into(), drive_dir.path().to_path_buf())]),
+            snapshots_dir: Some(snap_dir.path().to_path_buf()),
+        };
+        run_sync(
+            &cfg,
+            &config_dir.path().join("manifest.toml"),
+            &config_dir.path().join("sync_log.toml"),
+            &opts,
+        )
+        .unwrap();
+
+        let snap = Snapshot::load(&snap_dir.path().join("materia.toml")).unwrap();
+        assert_eq!(snap.device, "materia");
+        assert_eq!(snap.last_synced_with, "tardis");
+        // The drive's manifest at the end of sync should contain song.mp3.
+        assert!(snap.manifest.get_entry("music", "song.mp3").is_some());
+    }
+
+    #[test]
+    fn dry_run_does_not_write_snapshot() {
+        let host_dir = TempDir::new().unwrap();
+        let drive_dir = TempDir::new().unwrap();
+        let config_dir = TempDir::new().unwrap();
+        let snap_dir = TempDir::new().unwrap();
+
+        touch(&host_dir.path().join("song.mp3"), "hello");
+
+        let cfg = make_config(host_dir.path(), "MATERIA");
+        let opts = SyncOpts {
+            dry_run: true,
+            drive_mounts: HashMap::from([("materia".into(), drive_dir.path().to_path_buf())]),
+            snapshots_dir: Some(snap_dir.path().to_path_buf()),
+        };
+        run_sync(
+            &cfg,
+            &config_dir.path().join("manifest.toml"),
+            &config_dir.path().join("sync_log.toml"),
+            &opts,
+        )
+        .unwrap();
+
+        assert!(!snap_dir.path().join("materia.toml").exists());
+    }
+
+    #[test]
     fn sync_appends_to_host_log() {
         use crate::sync_log::{LogLevel, Operation, SyncLog};
 
@@ -446,6 +516,7 @@ mod tests {
         let opts = SyncOpts {
             dry_run: false,
             drive_mounts: HashMap::from([("materia".into(), drive_dir.path().to_path_buf())]),
+            snapshots_dir: None,
         };
         let log_path = config_dir.path().join("sync_log.toml");
 
@@ -480,6 +551,7 @@ mod tests {
         let opts = SyncOpts {
             dry_run: true,
             drive_mounts: HashMap::from([("materia".into(), drive_dir.path().to_path_buf())]),
+            snapshots_dir: None,
         };
         let host_manifest_path = config_dir.path().join("manifest.toml");
         let summary = run_sync(
@@ -508,6 +580,7 @@ mod tests {
         let opts = SyncOpts {
             dry_run: false,
             drive_mounts: HashMap::from([("materia".into(), drive_dir.path().to_path_buf())]),
+            snapshots_dir: None,
         };
         let host_manifest_path = config_dir.path().join("manifest.toml");
 
@@ -545,6 +618,7 @@ mod tests {
         let opts = SyncOpts {
             dry_run: false,
             drive_mounts: HashMap::from([("materia".into(), drive_dir.path().to_path_buf())]),
+            snapshots_dir: None,
         };
         run_sync(
             &cfg,
@@ -569,6 +643,7 @@ mod tests {
         let opts = SyncOpts {
             dry_run: false,
             drive_mounts: HashMap::new(),
+            snapshots_dir: None,
         };
         let summary = run_sync(
             &cfg,

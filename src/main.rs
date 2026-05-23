@@ -677,6 +677,165 @@ fn cmd_bind_list() -> Result<()> {
     Ok(())
 }
 
+fn cmd_status() -> Result<()> {
+    use redlight::config::DeviceType;
+    use redlight::manifest::Manifest;
+    use redlight::snapshot::{self, Snapshot};
+
+    let dir = config_dir();
+    if !dir.join("devices.toml").exists() {
+        println!("No config found at {}.", dir.display());
+        println!("Run {} to create one.", "rl init".bold());
+        return Ok(());
+    }
+    let config = Config::load(&dir)?;
+    let state = state_dir();
+
+    // Host (this machine).
+    let current_host = current_hostname();
+    let host = config
+        .devices
+        .values()
+        .find(|d| {
+            d.device_type == DeviceType::Host
+                && d.matcher.hostname.as_deref() == Some(current_host.as_str())
+        })
+        .or_else(|| {
+            config
+                .devices
+                .values()
+                .filter(|d| d.device_type == DeviceType::Host)
+                .find(|_| {
+                    config
+                        .devices
+                        .values()
+                        .filter(|d| d.device_type == DeviceType::Host)
+                        .count()
+                        == 1
+                })
+        });
+
+    let host_manifest_path = dir.join("manifest.toml");
+    let host_manifest = if host_manifest_path.exists() {
+        Some(Manifest::load(&host_manifest_path)?)
+    } else {
+        None
+    };
+
+    println!("{}", "host".bold());
+    match host {
+        Some(h) => {
+            println!(
+                "  {} {}  ({})",
+                "▣".green(),
+                h.name.bold(),
+                current_host.dimmed()
+            );
+            if let Some(desc) = &h.description {
+                println!("    {}", desc.dimmed());
+            }
+            match &host_manifest {
+                Some(m) => {
+                    let total: usize = m.items.values().map(|i| i.files.len()).sum();
+                    println!("    {} item(s), {} file(s) tracked", m.items.len(), total);
+                }
+                None => println!("    {}", "no manifest yet — never synced".dimmed()),
+            }
+        }
+        None => println!(
+            "  {} no host matches this machine's hostname '{}'.\n    Set {} on one of the host entries in devices.toml.",
+            "✗".red(),
+            current_host,
+            "match.hostname".bold()
+        ),
+    }
+    println!();
+
+    // Other devices via snapshots.
+    let snaps_dir = snapshot::snapshots_dir(&state);
+    let snapshots = snapshot::list(&snaps_dir)?;
+    let snap_by_device: std::collections::HashMap<&str, &Snapshot> =
+        snapshots.iter().map(|s| (s.device.as_str(), s)).collect();
+
+    let other_devices: Vec<_> = config
+        .devices
+        .values()
+        .filter(|d| d.device_type != DeviceType::Host)
+        .collect();
+
+    if other_devices.is_empty() {
+        println!(
+            "{} (declare some with `rl device add`)",
+            "no other devices".dimmed()
+        );
+        return Ok(());
+    }
+
+    println!("{}", "other devices".bold());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    for d in &other_devices {
+        let dot = match snap_by_device.get(d.name.as_str()) {
+            Some(_) => "▣".green(),
+            None => "▢".dimmed(),
+        };
+        let type_label = match d.device_type {
+            DeviceType::Drive => "drive",
+            DeviceType::Phone => "phone",
+            DeviceType::Host => "host",
+        };
+        println!(
+            "  {} {}  {}",
+            dot,
+            d.name.bold(),
+            format!("({type_label})").dimmed()
+        );
+        if let Some(desc) = &d.description {
+            println!("    {}", desc.dimmed());
+        }
+        match snap_by_device.get(d.name.as_str()) {
+            Some(snap) => {
+                let total: usize = snap.manifest.items.values().map(|i| i.files.len()).sum();
+                println!(
+                    "    last seen {} ago via {} · {} item(s), {} file(s)",
+                    humanize_age(now - snap.last_synced_at).dimmed(),
+                    snap.last_synced_with.dimmed(),
+                    snap.manifest.items.len(),
+                    total
+                );
+            }
+            None => println!("    {}", "never synced from this host".dimmed()),
+        }
+    }
+
+    Ok(())
+}
+
+fn current_hostname() -> String {
+    gethostname::gethostname().to_string_lossy().into_owned()
+}
+
+fn humanize_age(secs: i64) -> String {
+    if secs < 0 {
+        return "moments".into();
+    }
+    if secs < 60 {
+        return format!("{secs}s");
+    }
+    let mins = secs / 60;
+    if mins < 60 {
+        return format!("{mins}m");
+    }
+    let hours = mins / 60;
+    if hours < 48 {
+        return format!("{hours}h");
+    }
+    let days = hours / 24;
+    format!("{days}d")
+}
+
 fn cmd_doctor() -> Result<()> {
     let dir = config_dir();
     let devices_toml = dir.join("devices.toml");
@@ -780,6 +939,7 @@ fn cmd_sync(dry_run: bool, drive_mount: Vec<String>) -> Result<()> {
     let opts = SyncOpts {
         dry_run,
         drive_mounts,
+        snapshots_dir: Some(redlight::snapshot::snapshots_dir(&state_dir())),
     };
 
     let summary = run_sync(
@@ -848,6 +1008,7 @@ fn cmd_daemon() -> Result<()> {
     let opts = DaemonOpts {
         host_manifest_path: dir.join("manifest.toml"),
         log_path: state_dir().join("sync_log.toml"),
+        snapshots_dir: Some(redlight::snapshot::snapshots_dir(&state_dir())),
         stop,
     };
     daemon::run(&config, watcher, &opts)?;
@@ -860,7 +1021,7 @@ fn main() -> Result<()> {
         Some(Command::Init { name, description }) => cmd_init(name, description)?,
         Some(Command::Start) => println!("start: not yet implemented"),
         Some(Command::Stop) => println!("stop: not yet implemented"),
-        Some(Command::Status) => println!("status: not yet implemented"),
+        Some(Command::Status) => cmd_status()?,
         Some(Command::Doctor) => cmd_doctor()?,
         Some(Command::Sync {
             dry_run,
