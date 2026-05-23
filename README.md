@@ -1,155 +1,155 @@
 # Redlight
 
-> `rl` — synchronise tes appareils par USB, sans cloud, sans app, sans friction.
+> `rl` — sync your devices over USB, no cloud, no app, no friction.
 
-Redlight est un programme cross-platform (macOS + Linux en v1, Windows en v2) qui synchronise automatiquement des fichiers et dossiers entre plusieurs périphériques (ordi, téléphone, disque externe) au moment de leur branchement. Aucune app à installer sur les périphériques passifs, aucun cloud, tout passe par USB.
-
----
-
-## Philosophie
-
-- **Multi-périphériques.** Ordi, téléphone, disque externe — tous sont des devices au même titre. Chacun porte son état local.
-- **Le ring.** Modèle cible : pas de hub privilégié, deux devices co-présents se réconcilient pairwise et le plus récent gagne. *(En v0.0.1 `rl sync` n'orchestre que les paires host ↔ drive ; deux drives partageant un item via le host sont quand même synchronisés par transitivité — cf. "Ne fait pas v1".)*
-- **Pas de cloud.** Tout passe par USB, rien ne transite par un serveur tiers.
-- **Pas de dossier imposé.** Chaque règle pointe vers les vrais emplacements des fichiers, où qu'ils soient.
-- **Les passifs ne font rien.** Téléphone et disque sont passifs, ils portent juste leur manifeste. Seul l'ordi exécute.
-- **Prévisible.** Un dossier sync tout son contenu (filtrable via `include`/`exclude`). Un fichier sync uniquement ce fichier.
-- **Transparent.** Un manifeste TOML par device décrit l'état connu de chaque fichier suivi.
+Redlight is a cross-platform program (macOS + Linux in v1, Windows in v2) that automatically synchronises files and folders across multiple peripherals (computer, phone, external drive) whenever they're plugged in. No app to install on passive devices, no cloud, everything goes over USB.
 
 ---
 
-## Modèle
+## Philosophy
 
-Trois entités :
+- **Multi-peripheral.** Computer, phone, external drive — all are devices at the same level. Each carries its own local state.
+- **The ring.** Target model: no privileged hub, any two co-present devices reconcile pairwise and the most recent wins. *(In v0.0.1 `rl sync` only orchestrates host ↔ drive pairs; two drives sharing an item via the host are still kept in agreement by transitivity — see "What Redlight doesn't do" below.)*
+- **No cloud.** Everything flows over USB, nothing transits through a third-party server.
+- **No imposed folder.** Each rule points at the actual location of files, wherever they live.
+- **Passive devices do nothing.** Phone and drive are passive, they only carry their manifest. Only the host executes.
+- **Predictable.** A folder syncs all its contents (filterable via `include`/`exclude`). A file syncs that one file only.
+- **Transparent.** A TOML manifest per device records the known state of every tracked file.
 
-- **Device** — un périphérique. Type *actif* (porte le daemon) ou *passif* (porte juste son manifeste).
-- **Item** — une unité synchronisée (dossier ou fichier), avec filtres `include`/`exclude` et `category` optionnelle.
-- **Binding** — un couple (item, device). Définit le `path` sur ce device et le `role` (`read_write` ou `read_only`).
+---
 
-Un sync existe entre deux devices pour un item ssi les deux ont un binding sur cet item.
+## Model
 
-| Combo | Comportement |
+Three entities:
+
+- **Device** — a peripheral. Type *active* (carries the daemon) or *passive* (carries only its manifest).
+- **Item** — a synced unit (folder or file), with `include`/`exclude` filters and an optional `category`.
+- **Binding** — a (item, device) pair. Defines the `path` on that device and the `role` (`read_write` or `read_only`).
+
+A sync exists between two devices for an item iff both have a binding to it.
+
+| Combo | Behavior |
 |---|---|
-| Actif + Passif | cas standard, l'actif pilote |
-| Actif + Actif | prévu par le modèle, hors scope v0.0.1 |
-| Passif + Passif | ignoré (pas de daemon) |
+| Active + Passive | standard case, the active drives |
+| Active + Active | planned by the model, out of scope in v0.0.1 |
+| Passive + Passive | ignored (no daemon) |
 
-Pour le schéma TOML détaillé, les filtres, les exclusions automatiques et des exemples de config (sync clé USB entière, etc.), voir **[docs/configuration.md](docs/configuration.md)**.
+For the detailed TOML schema, filters, automatic exclusions, and config examples (full USB key sync, etc.), see **[docs/configuration.md](docs/configuration.md)**.
 
 ---
 
-## Fonctionnement
+## How it works
 
-À chaque branchement d'un device connu :
+Every time a known device is plugged in:
 
-1. Le daemon détecte (IOKit + DiskArbitration sur macOS, udev sur Linux)
-2. Il identifie le device via son ID matériel ou son label de volume
-3. Il charge la config (`devices.toml`, `items.toml`, `bindings.toml`)
-4. Pour chaque item bindé sur ce device et sur un autre device présent : diff manifeste vs état réel
-5. Réconciliation pairwise, transferts respectant les `role`
-6. Mise à jour des manifestes locaux et du log
-7. Notification via menu bar
+1. The daemon detects it (IOKit + DiskArbitration on macOS, udev on Linux)
+2. It identifies the device by hardware ID or volume label
+3. It loads the config (`devices.toml`, `items.toml`, `bindings.toml`)
+4. For each item bound on this device and on another present device: diff manifest vs. live state
+5. Pairwise reconciliation, transfers respecting the `role`s
+6. Update local manifests and log
+7. Notification via the menu bar
 
 ---
 
 ## Installation
 
-> ⚠️ Aucun canal de distribution n'est encore actif. Tout ce qui suit est l'objectif cible.
+> ⚠️ No distribution channel is active yet. Everything below is the target.
 
 ### macOS
 
 ```bash
-brew install redlight                                      # à venir
-# ou
-curl -fsSL https://slashome.me/apps/redlight.sh | sh       # à venir
+brew install redlight                                      # coming soon
+# or
+curl -fsSL https://slashome.me/apps/redlight.sh | sh       # coming soon
 ```
 
 ### Linux
 
 ```bash
-curl -fsSL https://slashome.me/apps/redlight.sh | sh       # à venir
-# .deb / .rpm / AUR : voir la page Releases GitHub          # à venir
+curl -fsSL https://slashome.me/apps/redlight.sh | sh       # coming soon
+# .deb / .rpm / AUR : see the GitHub Releases page          # coming soon
 ```
 
-L'installateur téléchargera un binaire pré-compilé et installera automatiquement les dépendances système nécessaires (`libmtp`, `jmtpfs`, `macfuse` sur Mac) via le gestionnaire de paquets de l'OS. Si tu actives un device en `bridge = "adb"`, il te proposera aussi `android-platform-tools`.
+The installer will download a pre-built binary and automatically install the required system dependencies (`libmtp`, `jmtpfs`, `macfuse` on Mac) via the OS package manager. If you enable a device with `bridge = "adb"`, it will also offer to install `android-platform-tools`.
 
-### Première utilisation
+### First-time setup
 
 ```bash
-rl init                                                          # crée la config, enregistre le service système
-rl start                                                         # démarre le daemon (auto au login ensuite)
-rl device add jarvis --type phone --bridge mtp                   # déclarer un device
-rl item add music --kind folder --include "**/*.mp3"             # déclarer un item
+rl init                                                          # creates the config, registers the system service
+rl start                                                         # starts the daemon (auto at login afterwards)
+rl device add jarvis --type phone --bridge mtp                   # declare a device
+rl item add music --kind folder --include "**/*.mp3"             # declare an item
 rl bind add --item music --device tardis --path ~/Music --role read_write
 rl status
 ```
 
 ---
 
-## Commandes `rl`
+## `rl` commands
 
-| commande | description |
-|----------|-------------|
-| `rl init` | initialise la config et enregistre l'agent (launchd / systemd user) |
-| `rl start` / `rl stop` / `rl restart` | contrôle du daemon |
-| `rl status` | état du daemon, devices connectés, dernière sync par binding |
-| `rl doctor` | vérifie que les prérequis système (jmtpfs, adb…) sont disponibles |
-| `rl device add\|remove\|list` | gestion des devices |
-| `rl item add\|remove\|list` | gestion des items |
-| `rl bind add\|remove\|list` | gestion des bindings |
-| `rl sync [--dry-run] [--drive-mount NAME=PATH]` | force une sync immédiate |
-| `rl log [--errors] [--device N] [--item N] [--tail N]` | affiche les logs |
-| `rl manifest [--device N] [--item N]` | affiche le manifeste |
+| command | description |
+|---------|-------------|
+| `rl init` | initialise the config and register the agent (launchd / systemd user) |
+| `rl start` / `rl stop` / `rl restart` | daemon control |
+| `rl status` | daemon state, connected devices, last sync per binding |
+| `rl doctor` | verify system prerequisites (jmtpfs, adb…) are available |
+| `rl device add\|remove\|list` | manage devices |
+| `rl item add\|remove\|list` | manage items |
+| `rl bind add\|remove\|list` | manage bindings |
+| `rl sync [--dry-run] [--drive-mount NAME=PATH]` | force an immediate sync |
+| `rl log [--errors] [--device N] [--item N] [--tail N]` | show logs |
+| `rl manifest [--device N] [--item N]` | show the manifest |
 
 ---
 
-## Stack technique
+## Technical stack
 
-| composant | technologie |
+| component | technology |
 |-----------|------------|
-| Langage | Rust (édition 2024) |
-| Daemon | `launchd` (macOS) / `systemd --user` (Linux) / Service Windows (v2) |
+| Language | Rust (2024 edition) |
+| Daemon | `launchd` (macOS) / `systemd --user` (Linux) / Windows service (v2) |
 | CLI | `clap` |
-| Config & manifeste | `serde` + `toml` |
-| Détection USB & volumes | `io-kit-sys` + `core-foundation` (macOS) / `udev` (Linux) |
-| Bridge MTP | `jmtpfs` (FUSE) au-dessus de `libmtp` |
-| Bridge ADB | `adb` (Android Platform Tools, opt-in) |
-| Bridge FS | stdlib + `walkdir` |
+| Config & manifest | `serde` + `toml` |
+| USB & volume detection | `io-kit-sys` + `core-foundation` (macOS) / `udev` (Linux) |
+| MTP bridge | `jmtpfs` (FUSE) on top of `libmtp` |
+| ADB bridge | `adb` (Android Platform Tools, opt-in) |
+| FS bridge | stdlib + `walkdir` |
 | Menu bar / tray | `tray-icon` (cross-platform) |
 | Async runtime | `tokio` |
 | Logs | `tracing` + `tracing-subscriber` |
-| Filtres glob | `globset` |
+| Glob filters | `globset` |
 | Hashing | `md-5` |
 | Packaging | `cargo-bundle` (macOS) / `cargo-deb` (Linux) / `cargo-wix` (Windows v2) |
 
 ---
 
-## Ce que Redlight ne fait pas (v1)
+## What Redlight doesn't do (v1)
 
-- Pas de sync Wi-Fi
-- Pas de cloud
-- Pas d'app sur les périphériques passifs
-- Pas de chiffrement (prévu v2)
-- Pas de support Windows (prévu v2)
-- Pas de gestion fine des conflits (le plus récent gagne)
-- Pas de sync drive ↔ drive direct dans `rl sync` — la transitivité par le host couvre le cas standard
-- Pas de sync sur phone via `rl sync` — auto-détection USB en Phase 4 ; en attendant : `cargo run --example mtp_probe` ou `adb_probe`
+- No Wi-Fi sync
+- No cloud
+- No app on passive devices
+- No encryption (planned v2)
+- No Windows support (planned v2)
+- No fine-grained conflict resolution (most recent wins)
+- No direct drive ↔ drive sync in `rl sync` — transitivity through the host covers the standard case
+- No phone sync via `rl sync` — USB auto-detection in Phase 4; meanwhile: `cargo run --example mtp_probe` or `adb_probe`
 
 ---
 
-## Contribuer
+## Contributing
 
 ```bash
-# Toolchain Rust
+# Rust toolchain
 brew install rust                                                       # macOS
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh          # Linux/macOS via rustup
 
-# Dépendances système (hard)
+# System dependencies (hard)
 brew install libmtp jmtpfs macfuse                                      # macOS
 sudo apt install libmtp-dev jmtpfs fuse libudev-dev pkg-config          # Debian/Ubuntu
 sudo dnf install libmtp-devel jmtpfs fuse systemd-devel pkg-config      # Fedora
 
-# Optionnel — uniquement pour bidouiller le bridge ADB
+# Optional — only when working on the ADB bridge
 brew install android-platform-tools                                     # macOS
 sudo apt install android-tools-adb                                      # Debian/Ubuntu
 
@@ -160,10 +160,10 @@ cargo test
 cargo run -- --help
 ```
 
-Doc plus poussée : [docs/configuration.md](docs/configuration.md).
+More in-depth docs: [docs/configuration.md](docs/configuration.md).
 
 ---
 
-## Licence
+## License
 
 MIT

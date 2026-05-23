@@ -22,37 +22,37 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Initialiser la config et enregistrer le service système.
+    /// Initialise the config and register the system service.
     Init,
-    /// Démarrer le daemon.
+    /// Start the daemon.
     Start,
-    /// Arrêter le daemon.
+    /// Stop the daemon.
     Stop,
-    /// Afficher l'état du daemon et des devices.
+    /// Show daemon and device status.
     Status,
-    /// Vérifier que les prérequis système (jmtpfs, adb…) sont disponibles
-    /// pour chaque device configuré.
+    /// Verify that system prerequisites (jmtpfs, adb…) are available for
+    /// each configured device.
     Doctor,
-    /// Lancer une synchronisation host ↔ drive(s).
+    /// Run a host ↔ drive(s) synchronisation.
     ///
-    /// Détecte les drives montés (via `/Volumes/<label>` ou
-    /// `/media/<label>`) et synchronise chaque item partagé avec le host.
-    /// Les phones sont gérés par le daemon (Phase 4).
+    /// Detects mounted drives (via `/Volumes/<label>` or `/media/<label>`)
+    /// and syncs each shared item with the host. Phones are handled by
+    /// the daemon (Phase 4).
     Sync {
-        /// Affiche ce qui serait fait sans rien transférer.
+        /// Show what would be done without transferring anything.
         #[arg(long)]
         dry_run: bool,
-        /// Force un point de montage pour un drive : `--drive-mount materia=/Volumes/MATERIA`.
-        /// Répétable pour plusieurs drives.
+        /// Force a drive's mount point: `--drive-mount materia=/Volumes/MATERIA`.
+        /// Repeatable for multiple drives.
         #[arg(long = "drive-mount", value_name = "NAME=PATH")]
         drive_mount: Vec<String>,
     },
-    /// Lance le daemon en foreground.
+    /// Run the daemon in the foreground.
     ///
-    /// Polle `/Volumes` (macOS) ou `/media` + `/mnt` (Linux) toutes les
-    /// ~2s ; chaque drive reconnu déclenche une sync immédiate.
-    /// Ctrl-C pour quitter (signal handler propre arrivera avec
-    /// Phase 4.5/4.6). Les phones ne sont pas encore détectés.
+    /// Polls `/Volumes` (macOS) or `/media` + `/mnt` (Linux) every ~2s;
+    /// each recognised drive triggers an immediate sync. Ctrl-C to
+    /// exit (proper signal handler arrives in Phase 4.5/4.6). Phones
+    /// aren't detected yet.
     Daemon,
 }
 
@@ -61,7 +61,7 @@ fn cmd_doctor() -> Result<()> {
     let devices_toml = dir.join("devices.toml");
     if !devices_toml.exists() {
         println!(
-            "Aucune config trouvée à {}.\nLance {} pour en créer une.",
+            "No config found at {}.\nRun {} to create one.",
             dir.display(),
             "rl init".bold()
         );
@@ -70,17 +70,13 @@ fn cmd_doctor() -> Result<()> {
 
     let config = Config::load(&dir)?;
     if config.devices.is_empty() {
-        println!("Config trouvée mais aucun device déclaré.");
+        println!("Config found but no device declared.");
         return Ok(());
     }
 
     println!(
         "{}\n",
-        format!(
-            "Vérification de {} device(s) configuré(s)…",
-            config.devices.len()
-        )
-        .bold()
+        format!("Checking {} configured device(s)…", config.devices.len()).bold()
     );
 
     let mut issues = 0;
@@ -92,12 +88,12 @@ fn cmd_doctor() -> Result<()> {
             .unwrap_or_default();
 
         let check = match device.bridge {
-            BridgeKind::Fs => Ok("aucun prérequis externe".to_string()),
+            BridgeKind::Fs => Ok("no external prerequisite".to_string()),
             BridgeKind::Mtp => {
-                MtpBridge::check_prerequisites().map(|_| "jmtpfs disponible".to_string())
+                MtpBridge::check_prerequisites().map(|_| "jmtpfs available".to_string())
             }
             BridgeKind::Adb => {
-                AdbBridge::check_prerequisites().map(|_| "adb disponible".to_string())
+                AdbBridge::check_prerequisites().map(|_| "adb available".to_string())
             }
         };
 
@@ -126,14 +122,14 @@ fn cmd_doctor() -> Result<()> {
     println!();
     if issues > 0 {
         let msg = if issues == 1 {
-            "1 problème détecté.".to_string()
+            "1 issue detected.".to_string()
         } else {
-            format!("{issues} problèmes détectés.")
+            format!("{issues} issues detected.")
         };
         println!("{}", msg.red().bold());
         std::process::exit(1);
     }
-    println!("{}", "Tout OK.".green().bold());
+    println!("{}", "All good.".green().bold());
     Ok(())
 }
 
@@ -151,7 +147,7 @@ fn cmd_sync(dry_run: bool, drive_mount: Vec<String>) -> Result<()> {
     let dir = config_dir();
     if !dir.join("devices.toml").exists() {
         println!(
-            "Aucune config trouvée à {}.\nLance {} pour en créer une.",
+            "No config found at {}.\nRun {} to create one.",
             dir.display(),
             "rl init".bold()
         );
@@ -180,10 +176,10 @@ fn cmd_sync(dry_run: bool, drive_mount: Vec<String>) -> Result<()> {
     }
 
     let line = if opts.dry_run {
-        format!("Dry run. {} paire(s) examinée(s).", summary.pairs)
+        format!("Dry run. {} pair(s) examined.", summary.pairs)
     } else {
         format!(
-            "Terminé. {} paire(s), {} action(s), {} échec(s).",
+            "Done. {} pair(s), {} action(s), {} failure(s).",
             summary.pairs, summary.successes, summary.failures
         )
     };
@@ -204,7 +200,7 @@ fn cmd_daemon() -> Result<()> {
     let dir = config_dir();
     if !dir.join("devices.toml").exists() {
         println!(
-            "Aucune config trouvée à {}.\nLance {} pour en créer une.",
+            "No config found at {}.\nRun {} to create one.",
             dir.display(),
             "rl init".bold()
         );
@@ -250,7 +246,7 @@ fn main() -> Result<()> {
             drive_mount,
         }) => cmd_sync(dry_run, drive_mount)?,
         Some(Command::Daemon) => cmd_daemon()?,
-        None => println!("rl {} — passe --help", redlight::VERSION),
+        None => println!("rl {} — pass --help", redlight::VERSION),
     }
     Ok(())
 }

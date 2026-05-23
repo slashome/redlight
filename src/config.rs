@@ -488,7 +488,7 @@ match.serial = "ABC123"
 [music]
 kind = "folder"
 category = "audio"
-description = "Ma collection FLAC trié par artiste"
+description = "My FLAC collection sorted by artist"
 include = ["**/*.mp3"]
 exclude = ["**/draft-*"]
 
@@ -499,7 +499,7 @@ kind = "file"
         assert_eq!(raw["music"].kind, ItemKind::Folder);
         assert_eq!(
             raw["music"].description.as_deref(),
-            Some("Ma collection FLAC trié par artiste")
+            Some("My FLAC collection sorted by artist")
         );
         assert_eq!(raw["music"].include, vec!["**/*.mp3".to_string()]);
         assert_eq!(raw["contrat"].kind, ItemKind::File);

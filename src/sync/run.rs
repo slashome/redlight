@@ -254,7 +254,7 @@ fn sync_item(
     summary.pairs += 1;
 
     if actions.is_empty() {
-        println!("  {}", "rien à faire".dimmed());
+        println!("  {}", "nothing to do".dimmed());
         return Ok(());
     }
 

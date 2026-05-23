@@ -423,7 +423,7 @@ Quit
   - `caveats` block: tell the user to `brew install --cask macfuse` separately (macFUSE is a cask because of the kernel extension; can't be a `depends_on` in a Formula) + the start command
   - Release workflow: `git tag v0.0.X` → `shasum -a 256` of the tarball → bump `url`/`sha256` in `redlight.rb` in the tap → push tap
   - `rl init` only writes config files; service registration / start lives entirely in brew/systemd land (Unix convention)
-- [ ] Installateur `redlight.sh` hébergé sur `slashome.me/apps/`: détecte l'OS, télécharge le binaire de la dernière release GitHub, installe `libmtp` via le gestionnaire de paquets local
+- [ ] `redlight.sh` installer hosted on `slashome.me/apps/`: detects the OS, downloads the latest GitHub release binary, installs `libmtp` via the local package manager
 - [ ] `.icns` / `.png` icon
 - [ ] Update check via GitHub releases API
 

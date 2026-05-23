@@ -1,17 +1,17 @@
 # Configuration
 
-Cette page documente le schéma des trois fichiers TOML qui pilotent Redlight, les valeurs autorisées pour chaque champ, et donne des exemples concrets de patterns courants. Pour la vue d'ensemble, voir le [README](../README.md).
+This page documents the schema of the three TOML files that drive Redlight, the allowed values for each field, and shows concrete examples of common patterns. For the overview, see the [README](../README.md).
 
-Les trois fichiers vivent dans `~/.config/redlight/` (ou `$XDG_CONFIG_HOME/redlight/`) :
-- `devices.toml` — les périphériques connus
-- `items.toml` — les dossiers / fichiers à synchroniser
-- `bindings.toml` — où vit chaque item sur chaque device
+The three files live in `~/.config/redlight/` (or `$XDG_CONFIG_HOME/redlight/`):
+- `devices.toml` — known peripherals
+- `items.toml` — folders / files to sync
+- `bindings.toml` — where each item lives on each device
 
 ---
 
 ## `devices.toml`
 
-Un bloc par périphérique. La clé (`[tardis]`) est le **nom court** que tu utilises partout ailleurs ; `description` est libre pour la lisibilité humaine.
+One block per peripheral. The key (`[tardis]`) is the **short name** you'll use everywhere else; `description` is free-form for human readability.
 
 ```toml
 [tardis]
@@ -30,47 +30,48 @@ match.serial = "ABC123"
 [materia]
 type = "drive"
 bridge = "fs"
-description = "SSD Playstation"
+description = "Playstation SSD"
 match.volume_label = "MATERIA"
 ```
 
-### Champs
+### Fields
 
-| champ | type | obligatoire | description |
+| field | type | required | description |
 |---|---|---|---|
-| `type` | `"host"` \| `"phone"` \| `"drive"` | oui | nature du device |
-| `bridge` | `"fs"` \| `"mtp"` \| `"adb"` | oui | comment Redlight parle au device |
-| `description` | string | non | libellé libre |
-| `match.vendor_id` / `match.product_id` / `match.serial` | string | phone : `serial` obligatoire | identification USB (sortie de `system_profiler` / `lsusb`) |
-| `match.volume_label` / `match.volume_uuid` | string | drive : au moins un des deux | label de partition / UUID filesystem |
+| `type` | `"host"` \| `"phone"` \| `"drive"` | yes | device kind |
+| `bridge` | `"fs"` \| `"mtp"` \| `"adb"` | yes | how Redlight talks to the device |
+| `description` | string | no | free-form label |
+| `match.vendor_id` / `match.product_id` / `match.serial` | string | phone: `serial` required | USB identification (from `system_profiler` / `lsusb`) |
+| `match.volume_label` / `match.volume_uuid` | string | drive: at least one of the two | partition label / filesystem UUID |
+| `match.hostname` | string | needed only when multiple hosts | matched against `gethostname()` at runtime |
 
-### Compatibilité bridge ↔ type
+### Bridge ↔ type compatibility
 
-| type | bridges autorisés |
+| type | allowed bridges |
 |---|---|
 | `host` | `fs` |
 | `drive` | `fs` |
-| `phone` | `mtp` (défaut) ou `adb` |
+| `phone` | `mtp` (default) or `adb` |
 
-| bridge | usage | setup phone |
+| bridge | usage | phone setup |
 |--------|-------|-------------|
-| `fs`   | hôte, disques externes | — |
-| `mtp`  | Android, défaut, via `jmtpfs` (FUSE) | aucun |
-| `adb`  | Android, alternative recommandée pour power users : plus rapide, plus fiable, mtime précis | activer Developer Options + USB Debugging (~30s, une fois) |
+| `fs`   | host, external drives | — |
+| `mtp`  | Android, default, via `jmtpfs` (FUSE) | none |
+| `adb`  | Android, recommended for power users: faster, more reliable, accurate mtime | enable Developer Options + USB Debugging (~30s, once) |
 
-ADB n'est **pas** installé par défaut : il n'est tiré qu'à la demande si tu déclares `bridge = "adb"` sur un device.
+ADB is **not** installed by default: it's pulled in on demand if you declare `bridge = "adb"` on a device.
 
 ---
 
 ## `items.toml`
 
-Un bloc par unité à synchroniser. La clé (`[music]`) est le **nom de l'item**.
+One block per unit to sync. The key (`[music]`) is the **item's name**.
 
 ```toml
 [music]
 kind = "folder"
 category = "audio"
-description = "Ma collection FLAC trié par artiste"
+description = "My FLAC collection sorted by artist"
 include = ["**/*.mp3", "**/*.flac"]
 exclude = ["**/draft-*"]
 
@@ -79,48 +80,48 @@ kind = "file"
 category = "admin"
 ```
 
-### Champs
+### Fields
 
-| champ | type | obligatoire | description |
+| field | type | required | description |
 |---|---|---|---|
-| `kind` | `"folder"` \| `"file"` | oui | dossier récursif ou fichier unique |
-| `category` | string | non | tag libre |
-| `description` | string | non | libellé libre |
-| `include` | liste de globs | non | allowlist (vide = tout autorisé) |
-| `exclude` | liste de globs | non | denylist (toujours appliquée) |
+| `kind` | `"folder"` \| `"file"` | yes | recursive folder or single file |
+| `category` | string | no | free-form tag |
+| `description` | string | no | free-form label |
+| `include` | list of globs | no | allowlist (empty = everything allowed) |
+| `exclude` | list of globs | no | denylist (always applied) |
 
-### Types d'item
+### Item kinds
 
-| kind | comportement |
-|------|-------------|
-| `folder` | tout le contenu, récursif, filtrable via `include` / `exclude` |
-| `file` | uniquement ce fichier |
+| kind | behavior |
+|------|----------|
+| `folder` | all contents, recursive, filterable via `include` / `exclude` |
+| `file` | this one file only |
 
-### Filtres glob
+### Glob filters
 
-Syntaxe gitignore-style :
-- `**` — zéro ou plusieurs composants de chemin
-- `*` — n'importe quel nom de fichier sans `/`
-- `?` — un caractère
-- `[abc]` — caractère parmi `abc`
+gitignore-style syntax:
+- `**` — zero or more path components
+- `*` — any filename without `/`
+- `?` — one character
+- `[abc]` — any character among `abc`
 
-Un fichier passe s'il :
-1. matche au moins un pattern `include` (si la liste est non vide), **et**
-2. ne matche aucun pattern `exclude`
+A file passes iff:
+1. it matches at least one `include` pattern (if the list is non-empty), **and**
+2. it doesn't match any `exclude` pattern
 
-### Exclusions automatiques
+### Automatic exclusions
 
-Quel que soit ton `exclude`, Redlight refuse toujours de synchroniser :
-- son propre dossier de bookkeeping (`.redlight/`)
-- les détritus macOS (`.DS_Store`, `.Spotlight-V100/`, `.Trashes/`, `.fseventsd/`, `._*`, …)
-- les détritus Windows (`Thumbs.db`, `desktop.ini`, `$RECYCLE.BIN/`, `System Volume Information/`)
-- les détritus Linux (`lost+found/`, `.Trash-*/`)
+Whatever your `exclude` says, Redlight always refuses to sync:
+- its own bookkeeping folder (`.redlight/`)
+- macOS detritus (`.DS_Store`, `.Spotlight-V100/`, `.Trashes/`, `.fseventsd/`, `._*`, …)
+- Windows detritus (`Thumbs.db`, `desktop.ini`, `$RECYCLE.BIN/`, `System Volume Information/`)
+- Linux detritus (`lost+found/`, `.Trash-*/`)
 
 ---
 
 ## `bindings.toml`
 
-Tableau de couples (item × device). Chaque entrée dit "cet item, sur ce device, vit à ce path, avec ce rôle".
+Array of (item × device) pairs. Each entry says "this item, on this device, lives at this path, with this role".
 
 ```toml
 [[binding]]
@@ -142,51 +143,51 @@ path = "/Music"
 role = "read_write"
 ```
 
-### Champs
+### Fields
 
-| champ | type | obligatoire | description |
+| field | type | required | description |
 |---|---|---|---|
-| `item` | string | oui | nom d'un item déclaré dans `items.toml` |
-| `device` | string | oui | nom d'un device déclaré dans `devices.toml` |
-| `path` | string | non | chemin sur le device (voir défauts ci-dessous) |
-| `role` | `"read_write"` \| `"read_only"` | oui | participation à la sync |
-| `include` | liste de globs | non | allowlist spécifique au device (intersection avec l'item) |
-| `exclude` | liste de globs | non | denylist spécifique au device (union avec l'item) |
+| `item` | string | yes | name of an item declared in `items.toml` |
+| `device` | string | yes | name of a device declared in `devices.toml` |
+| `path` | string | no | path on the device (see defaults below) |
+| `role` | `"read_write"` \| `"read_only"` | yes | participation in sync |
+| `include` | list of globs | no | device-specific allowlist (intersection with the item's) |
+| `exclude` | list of globs | no | device-specific denylist (union with the item's) |
 
 ### Roles
 
-| role | comportement |
-|------|-------------|
-| `read_write` | participe pleinement |
-| `read_only` | reçoit, ne pousse jamais |
+| role | behavior |
+|------|----------|
+| `read_write` | participates fully |
+| `read_only` | receives, never pushes |
 
-### Chemins par défaut
+### Default paths
 
-Si `path` est absent :
+If `path` is absent:
 - **host** → `$HOME`
-- **drive** → racine du device (`/`)
-- **phone** → `/storage/emulated/0/` (racine du stockage utilisateur Android)
+- **drive** → device root (`/`)
+- **phone** → `/storage/emulated/0/` (Android user storage root)
 
-Binder à la racine d'un device est tout à fait légitime (voir l'exemple "clé USB" ci-dessous) — les exclusions automatiques empêchent le bookkeeping Redlight de polluer le binding.
+Binding to the root of a device is perfectly legitimate (see the "USB key" example below) — automatic exclusions keep Redlight's bookkeeping from polluting the binding.
 
-### Filtres par binding
+### Per-binding filters
 
-Les `include` / `exclude` peuvent vivre **à deux niveaux** :
+`include` / `exclude` can live **at two levels**:
 
-- **Au niveau de l'item** (`items.toml`) : définissent ce qu'est l'item en général, partagé par tous les devices qui le bindent.
-- **Au niveau du binding** (`bindings.toml`) : restreignent **spécifiquement** ce qui va sur ce device.
+- **At the item level** (`items.toml`): define what the item is in general, shared by every device that binds it.
+- **At the binding level** (`bindings.toml`): narrow **specifically** what goes to this device.
 
-Combinaison :
-- **Includes** : un fichier passe ssi il matche un pattern de l'item **ET** un pattern du binding (si non vides chacun). C'est une **intersection**.
-- **Excludes** : un fichier est bloqué si **n'importe quel** pattern (item, binding ou système) matche. C'est une **union**.
+Combination:
+- **Includes**: a file passes iff it matches one of the item's patterns **AND** one of the binding's (when each is non-empty). It's an **intersection**.
+- **Excludes**: a file is blocked if **any** pattern (item, binding, or system) matches. It's a **union**.
 
-Cas d'usage typique : tu as une collection musique complète sur tardis/hal9000/materia, mais tu veux **un sous-ensemble** sur jarvis (le téléphone manque de place pour tout) :
+Typical use case: full music collection on tardis/hal9000/materia, but **a subset** on jarvis (the phone is short on space):
 
 ```toml
 # items.toml
 [music]
 kind = "folder"
-include = ["**/*.mp3", "**/*.flac"]   # ce qu'est "music"
+include = ["**/*.mp3", "**/*.flac"]   # what "music" is
 
 # bindings.toml
 [[binding]]
@@ -194,7 +195,7 @@ item = "music"
 device = "jarvis"
 path = "/storage/emulated/0/Music"
 role = "read_only"
-include = [                            # subset spécifique au phone
+include = [                            # phone-specific subset
   "**/Beatles/**",
   "**/Daft Punk/**",
   "**/Top hits 2024/**",
@@ -202,9 +203,9 @@ include = [                            # subset spécifique au phone
 ]
 ```
 
-Effet sur jarvis : seuls les fichiers qui matchent `(*.mp3 OU *.flac) ET (sous Beatles/Daft Punk/Top hits 2024/Favorites)` sont synchronisés. Sur tardis/hal9000/materia (sans `include` binding), toute la musique reste synchronisée normalement.
+Effect on jarvis: only files that match `(*.mp3 OR *.flac) AND (under Beatles/Daft Punk/Top hits 2024/Favorites)` are synced. On tardis/hal9000/materia (no binding `include`), all music keeps syncing normally.
 
-Tu peux aussi exclure ponctuellement, ex. tu veux toute la musique sur jarvis sauf audiobooks :
+You can also exclude punctually, e.g. you want all music on jarvis except audiobooks:
 ```toml
 [[binding]]
 item = "music"
@@ -212,96 +213,96 @@ device = "jarvis"
 exclude = ["**/Audiobooks/**", "**/Podcasts/**"]
 ```
 
-### Règles de validation
+### Validation rules
 
-- Chaque binding doit référencer un `item` et un `device` connus
-- Pas de doublon `(item, device)` — un seul binding par paire
-- `bridge` doit être compatible avec `type` (cf. table plus haut)
-- `phone` requiert `match.serial` ; `drive` requiert `match.volume_label` ou `match.volume_uuid`
+- Each binding must reference a known `item` and `device`
+- No duplicate `(item, device)` — one binding per pair
+- `bridge` must be compatible with `type` (see table above)
+- `phone` requires `match.serial`; `drive` requires `match.volume_label` or `match.volume_uuid`
 
-Si la config est invalide, `rl init` / `rl doctor` te listent **toutes** les erreurs d'un coup, pas une par run.
+If the config is invalid, `rl init` / `rl doctor` list **every** error at once, not one per run.
 
 ---
 
-## Exemple : synchroniser une clé USB entière
+## Example: sync a whole USB key
 
-Cas d'usage : tu as une clé USB `xfiles` dont tu veux que **tout le contenu** soit reflété dans un sous-dossier dédié sur tes autres devices. Materia (ton SSD) ne participe pas — tu ne veux pas que cette clé pollue ton SSD principal.
+Use case: you have a USB key `xfiles` and you want **all of its contents** mirrored into a dedicated subfolder on your other devices. Materia (your SSD) doesn't participate — you don't want this key to pollute your main SSD.
 
-`devices.toml` (ajout) :
+`devices.toml` (additions):
 ```toml
 [xfiles]
 type = "drive"
 bridge = "fs"
-description = "Clé USB X-Files"
+description = "X-Files USB key"
 match.volume_label = "XFILES"
 ```
 
-`items.toml` (ajout) :
+`items.toml` (additions):
 ```toml
 [xfiles]
 kind = "folder"
-description = "Contenu intégral de la clé X-Files"
+description = "Full X-Files key contents"
 ```
 
-`bindings.toml` (ajout) :
+`bindings.toml` (additions):
 ```toml
 [[binding]]
 item = "xfiles"
 device = "xfiles"
-path = "/"                                          # racine de la clé
+path = "/"                                          # key root
 role = "read_write"
 
 [[binding]]
 item = "xfiles"
 device = "tardis"
-path = "~/documents/xfiles"                         # sous-dossier sur l'ordi
+path = "~/documents/xfiles"                         # subfolder on the computer
 role = "read_write"
 
 [[binding]]
 item = "xfiles"
 device = "jarvis"
-path = "/storage/emulated/0/saves/xfiles"           # sous-dossier sur le phone
-role = "read_only"                                  # le phone reçoit, ne pousse pas
+path = "/storage/emulated/0/saves/xfiles"           # subfolder on the phone
+role = "read_only"                                  # phone receives, never pushes
 ```
 
-`materia` n'a aucun binding sur `xfiles` → la clé ne se reflète pas sur le SSD. Les fichiers de bookkeeping (`xfiles:/.redlight/manifest.toml`) sont automatiquement filtrés et n'apparaissent pas dans le sous-dossier `xfiles/` des autres devices.
+`materia` has no binding on `xfiles` → the key doesn't mirror onto the SSD. Bookkeeping files (`xfiles:/.redlight/manifest.toml`) are auto-filtered and don't appear in the `xfiles/` subfolders on the other devices.
 
 ---
 
-## Exemple : 2 ordinateurs + un SSD navette
+## Example: 2 computers + a courier SSD
 
-Cas d'usage : tu as un Mac perso (tardis) et un Mac de travail (hal9000), un SSD (materia) que tu emportes avec toi. Tu veux que ta collection musique soit synchronisée entre les deux machines, materia servant de courrier — un Mac n'est jamais directement en présence de l'autre.
+Use case: you have a personal Mac (tardis) and a work Mac (hal9000), plus a SSD (materia) you carry between them. You want your music collection in sync across both machines, with materia acting as a courier — neither Mac is ever directly co-present with the other.
 
-Le modèle Redlight le supporte directement : on déclare **les deux machines comme des `type = "host"`**, le SSD comme drive, et trois bindings. Au runtime, chaque machine identifie quelle entrée host elle est via le champ `match.hostname` (comparé à `gethostname()`).
+The Redlight model supports this directly: declare **both machines as `type = "host"`**, the SSD as a drive, and three bindings. At runtime, each machine identifies which host entry it is by comparing `match.hostname` against `gethostname()`.
 
-`devices.toml` :
+`devices.toml`:
 ```toml
 [tardis]
 type = "host"
 bridge = "fs"
-description = "MacBook Pro perso"
+description = "Personal MacBook Pro"
 match.hostname = "tardis.local"
 
 [hal9000]
 type = "host"
 bridge = "fs"
-description = "Mac Pro travail"
+description = "Work Mac Pro"
 match.hostname = "hal9000.work.local"
 
 [materia]
 type = "drive"
 bridge = "fs"
-description = "SSD navette perso ↔ taf"
+description = "Personal ↔ work SSD courier"
 match.volume_label = "MATERIA"
 ```
 
-`items.toml` :
+`items.toml`:
 ```toml
 [music]
 kind = "folder"
 ```
 
-`bindings.toml` :
+`bindings.toml`:
 ```toml
 [[binding]]
 item = "music"
@@ -312,7 +313,7 @@ role = "read_write"
 [[binding]]
 item = "music"
 device = "hal9000"
-path = "~/Music"        # même chemin relatif au $HOME, même si l'utilisateur diffère
+path = "~/Music"        # same path relative to $HOME, even if the user account differs
 role = "read_write"
 
 [[binding]]
@@ -322,15 +323,15 @@ path = "/Music"
 role = "read_write"
 ```
 
-**Comment ça se déroule :**
+**How it plays out:**
 
-1. Chez toi, tardis tourne avec ce config. Tu branches materia. Le daemon de tardis sync `~/Music` (tardis) ↔ `/Music` (materia).
-2. Tu débranches materia, tu pars au travail.
-3. Au taf, hal9000 tourne avec le **même** config (synchronisé via dotfiles, par exemple). Tu branches materia. Le daemon de hal9000 sync `~/Music` (hal9000) ↔ `/Music` (materia).
-4. Net effet : la musique présente sur tardis a transité par materia jusqu'à hal9000, et inversement.
+1. At home, tardis runs with this config. You plug in materia. The tardis daemon syncs `~/Music` (tardis) ↔ `/Music` (materia).
+2. You unplug materia and head to work.
+3. At work, hal9000 runs with the **same** config (synced via dotfiles, for example). You plug in materia. The hal9000 daemon syncs `~/Music` (hal9000) ↔ `/Music` (materia).
+4. Net effect: the music present on tardis has travelled through materia to hal9000, and vice versa.
 
-Trois remarques :
+Three notes:
 
-- Le **même fichier de config** marche sur les deux machines. `match.hostname` permet à chaque daemon de savoir laquelle des entrées host est lui.
-- Si tu n'as qu'**une seule** machine, tu peux omettre `match.hostname` et déclarer un seul host — Redlight prend ce host par défaut.
-- Si tu en as **plusieurs** et qu'aucune n'a `match.hostname` qui matche, le daemon refuse de démarrer avec un message clair pointant vers la correction nécessaire. Pas de "qui tire le premier" silencieux.
+- The **same config file** works on both machines. `match.hostname` lets each daemon know which host entry it is.
+- If you only have **one** machine, you can omit `match.hostname` and declare a single host — Redlight picks that host by default.
+- If you have **several** and none of their `match.hostname` matches the current machine, the daemon refuses to start with a clear error pointing you to the fix. No silent "first wins".

@@ -1,4 +1,4 @@
-//! Redlight — synchronisation USB multi-périphériques.
+//! Redlight — USB multi-device sync.
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

@@ -1,4 +1,4 @@
 [music]
 kind = "folder"
-description = "Collection musique partagée perso ↔ taf via Materia"
+description = "Music collection shared personal ↔ work via Materia"
 include = ["**/*.mp3", "**/*.flac"]
