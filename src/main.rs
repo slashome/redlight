@@ -119,6 +119,13 @@ enum DeviceAction {
     Add(Box<DeviceAddArgs>),
     /// List all configured devices.
     List,
+    /// Remove a device from devices.toml. Bails if any binding still
+    /// references it; remove those bindings first with `rl bind remove`.
+    #[command(alias = "rm")]
+    Remove {
+        /// Device name (the key in devices.toml).
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -127,6 +134,13 @@ enum ItemAction {
     Add(ItemAddArgs),
     /// List all configured items.
     List,
+    /// Remove an item from items.toml. Bails if any binding still
+    /// references it; remove those bindings first with `rl bind remove`.
+    #[command(alias = "rm")]
+    Remove {
+        /// Item name (the key in items.toml).
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -136,6 +150,16 @@ enum BindAction {
     Add(BindAddArgs),
     /// List all bindings, grouped by item.
     List,
+    /// Remove the binding matching `--item NAME --device NAME`.
+    #[command(alias = "rm")]
+    Remove {
+        /// Item name.
+        #[arg(long)]
+        item: String,
+        /// Device name.
+        #[arg(long)]
+        device: String,
+    },
 }
 
 #[derive(clap::Args, Debug)]
@@ -700,6 +724,166 @@ fn cmd_bind_list() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn cmd_device_remove(name: String) -> Result<()> {
+    use toml_edit::DocumentMut;
+
+    let dir = config_dir();
+    let path = dir.join("devices.toml");
+    if !path.exists() {
+        bail!("No config found at {}. Run `rl init` first.", dir.display());
+    }
+    let config = Config::load(&dir)?;
+
+    // Refuse if any binding references this device.
+    let referencing: Vec<&str> = config
+        .bindings
+        .iter()
+        .filter(|b| b.device == name)
+        .map(|b| b.item.as_str())
+        .collect();
+    if !referencing.is_empty() {
+        bail!(
+            "device '{name}' is referenced by {n} binding(s) (items: {items}). \
+             Remove those first with `rl bind remove --item <item> --device {name}`.",
+            n = referencing.len(),
+            items = referencing.join(", "),
+        );
+    }
+
+    let original = std::fs::read_to_string(&path)?;
+    let mut doc: DocumentMut = original
+        .parse()
+        .with_context(|| format!("parsing {}", path.display()))?;
+    if doc.remove(&name).is_none() {
+        bail!("device '{name}' not found in {}.", path.display());
+    }
+    std::fs::write(&path, doc.to_string())?;
+
+    match Config::load(&dir) {
+        Ok(_) => {
+            println!("{} removed device {}.", "✓".green(), name.bold());
+            Ok(())
+        }
+        Err(e) => {
+            std::fs::write(&path, &original).ok();
+            bail!("config would be invalid, reverted:\n{e:#}");
+        }
+    }
+}
+
+fn cmd_item_remove(name: String) -> Result<()> {
+    use toml_edit::DocumentMut;
+
+    let dir = config_dir();
+    let path = dir.join("items.toml");
+    if !path.exists() {
+        bail!("No config found at {}. Run `rl init` first.", dir.display());
+    }
+    let config = Config::load(&dir)?;
+
+    let referencing: Vec<&str> = config
+        .bindings
+        .iter()
+        .filter(|b| b.item == name)
+        .map(|b| b.device.as_str())
+        .collect();
+    if !referencing.is_empty() {
+        bail!(
+            "item '{name}' is referenced by {n} binding(s) (devices: {devices}). \
+             Remove those first with `rl bind remove --item {name} --device <device>`.",
+            n = referencing.len(),
+            devices = referencing.join(", "),
+        );
+    }
+
+    let original = std::fs::read_to_string(&path)?;
+    let mut doc: DocumentMut = original
+        .parse()
+        .with_context(|| format!("parsing {}", path.display()))?;
+    if doc.remove(&name).is_none() {
+        bail!("item '{name}' not found in {}.", path.display());
+    }
+    std::fs::write(&path, doc.to_string())?;
+
+    match Config::load(&dir) {
+        Ok(_) => {
+            println!("{} removed item {}.", "✓".green(), name.bold());
+            Ok(())
+        }
+        Err(e) => {
+            std::fs::write(&path, &original).ok();
+            bail!("config would be invalid, reverted:\n{e:#}");
+        }
+    }
+}
+
+fn cmd_bind_remove(item: String, device: String) -> Result<()> {
+    use toml_edit::{DocumentMut, Item as TomlItem, Value};
+
+    let dir = config_dir();
+    let path = dir.join("bindings.toml");
+    if !path.exists() {
+        bail!("No config found at {}. Run `rl init` first.", dir.display());
+    }
+
+    let original = std::fs::read_to_string(&path)?;
+    let mut doc: DocumentMut = original
+        .parse()
+        .with_context(|| format!("parsing {}", path.display()))?;
+
+    let TomlItem::ArrayOfTables(arr) = doc
+        .entry("binding")
+        .or_insert(TomlItem::ArrayOfTables(Default::default()))
+    else {
+        bail!("bindings.toml: `binding` is not an array of tables");
+    };
+
+    let before = arr.len();
+    arr.retain(|t| {
+        let i = t.get("item").and_then(|v| v.as_str()).unwrap_or("");
+        let d = t.get("device").and_then(|v| v.as_str()).unwrap_or("");
+        !(i == item && d == device)
+    });
+    let removed = before - arr.len();
+    if removed == 0 {
+        // Sanity-check inline arrays too in case `bindings` is used as a
+        // top-level list of inline tables (unusual but legal).
+        if let Some(TomlItem::Value(Value::Array(_))) = doc.get_mut("binding") {
+            bail!(
+                "binding for item '{item}' on device '{device}' not found in {}.",
+                path.display()
+            );
+        }
+        bail!(
+            "binding for item '{item}' on device '{device}' not found in {}.",
+            path.display()
+        );
+    }
+
+    std::fs::write(&path, doc.to_string())?;
+
+    match Config::load(&dir) {
+        Ok(_) => {
+            println!(
+                "{} removed binding {} ↔ {}{}.",
+                "✓".green(),
+                item.bold(),
+                device.bold(),
+                if removed > 1 {
+                    format!(" ({removed} entries)").dimmed().to_string()
+                } else {
+                    String::new()
+                }
+            );
+            Ok(())
+        }
+        Err(e) => {
+            std::fs::write(&path, &original).ok();
+            bail!("config would be invalid, reverted:\n{e:#}");
+        }
+    }
 }
 
 fn cmd_status() -> Result<()> {
@@ -1297,14 +1481,17 @@ fn main() -> Result<()> {
         Some(Command::Device { action }) => match action {
             DeviceAction::Add(args) => cmd_device_add(*args)?,
             DeviceAction::List => cmd_device_list()?,
+            DeviceAction::Remove { name } => cmd_device_remove(name)?,
         },
         Some(Command::Item { action }) => match action {
             ItemAction::Add(args) => cmd_item_add(args)?,
             ItemAction::List => cmd_item_list()?,
+            ItemAction::Remove { name } => cmd_item_remove(name)?,
         },
         Some(Command::Bind { action }) => match action {
             BindAction::Add(args) => cmd_bind_add(args)?,
             BindAction::List => cmd_bind_list()?,
+            BindAction::Remove { item, device } => cmd_bind_remove(item, device)?,
         },
         None => println!("rl {} — pass --help", redlight::VERSION),
     }
