@@ -6,11 +6,14 @@
 //! file ops to [`FsBridge`] and unmounts on drop.
 //!
 //! Requires `jmtpfs` (plus its `libmtp` + FUSE dependencies) installed on
-//! the host. There's no homebrew formula for `jmtpfs` on macOS — users
-//! install macFUSE via cask and then build `jmtpfs` from source; on
-//! Linux it's a regular distro package.
+//! the host. On Linux that's a regular distro package
+//! (`apt install jmtpfs`, etc.). On macOS the only path is to build
+//! `jmtpfs` from source on top of macFUSE — the kernel-extension and
+//! source-build dance makes this fragile, so v0.0.x officially does not
+//! support MTP on macOS; users are pointed at ADB instead. See PLAN.md
+//! Phase 2.7 for the libmtp-direct rewrite that unblocks v0.1.0.
 //!
-//! Known limitation (v0.0.1): when multiple MTP devices are plugged in,
+//! Known limitation (v0.0.x): when multiple MTP devices are plugged in,
 //! `jmtpfs` selects the first one. The `matcher` field is stored but not
 //! yet used to disambiguate.
 
@@ -49,20 +52,33 @@ impl MtpBridge {
 
     /// Verify that `jmtpfs` is available. Call before [`Self::mount`] for a
     /// clear error message if the prerequisite is missing.
+    ///
+    /// If `jmtpfs` is in PATH, succeeds on any OS — power users on macOS
+    /// who have manually built `jmtpfs` on top of macFUSE can still use
+    /// the bridge. Otherwise the error tailors its advice per-OS: ADB on
+    /// macOS (jmtpfs path is unsupported in v0.0.x), `apt install jmtpfs`
+    /// on Linux.
     pub fn check_prerequisites() -> Result<()> {
-        Command::new("jmtpfs")
-            .arg("--version")
-            .output()
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "jmtpfs not found in PATH ({e}).\n  \
-                     macOS:  no homebrew formula — build from source\n          \
-                             (https://github.com/dechamps/jmtpfs)\n          \
-                             after `brew install --cask macfuse`\n  \
-                     Linux:  `apt install jmtpfs` / `dnf install jmtpfs`"
-                )
-            })?;
-        Ok(())
+        if Command::new("jmtpfs").arg("--version").output().is_ok() {
+            return Ok(());
+        }
+        if cfg!(target_os = "macos") {
+            bail!(
+                "MTP is not supported on macOS in v0.0.x.\n  \
+                 The jmtpfs / macFUSE path is fragile (kernel extension + \
+                 source build), so it's deferred until Redlight links libmtp \
+                 directly (PLAN.md Phase 2.7, planned for v0.1.0).\n  \
+                 For Android phones in the meantime:\n    \
+                 1. enable USB debugging on the phone\n    \
+                 2. brew install --cask android-platform-tools\n    \
+                 3. switch this device's `bridge` from `mtp` to `adb`"
+            )
+        } else {
+            bail!(
+                "jmtpfs not found in PATH. Install it with `apt install \
+                 jmtpfs` (Debian/Ubuntu) or `dnf install jmtpfs` (Fedora/RHEL)."
+            )
+        }
     }
 
     /// Mount the device into a fresh temp directory and return a bridge to it.

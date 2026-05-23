@@ -245,12 +245,21 @@ last_sync = 1715000100
 - [ ] Used for host + mounted drives (`/Volumes/*`, `/media/*`, `/mnt/*`)
 - [ ] No connect/disconnect logic, always available
 
-### 2.3 `MtpBridge`
-- [ ] `tokio::process::Command` wrapping libmtp tools (`mtp-detect`, `mtp-files`, `mtp-getfile`, `mtp-sendfile`, `mtp-delfile`)
-- [ ] Parse output reliably (consider piping through `--quiet` and structured flags)
-- [ ] Error mapping: device disconnected, locked file, no space
-- [ ] Alternative path: bind to a FUSE mount (`jmtpfs`, `go-mtpfs`) and reuse `FsBridge` semantics — evaluate which is more reliable
-- [ ] Future option: link `libmtp-sys` directly via FFI (skip subprocess overhead)
+### 2.3 `MtpBridge` (v0.0.x — jmtpfs shell-out)
+- [x] Shell out to `jmtpfs` and mount the device under a tempdir; reuse `FsBridge` on the mount
+- [x] Health check before sync (`check_prerequisites` looks for `jmtpfs` in PATH)
+- [x] OS-aware error: Linux points at `apt install jmtpfs`; macOS points at ADB (the FUSE path is unsupported, see 2.7)
+- [ ] Disambiguate which device gets mounted when several are plugged in (the `matcher` field is stored but ignored)
+
+### 2.7 `MtpBridge` — libmtp-direct (v0.1.0 unblocker)
+Rewrite of 2.3 that links libmtp directly instead of shelling out to `jmtpfs`. This is the **macOS unblocker** — the current jmtpfs path requires macFUSE (kernel extension + system-settings approval + source build) and is too fragile to ship, so v0.0.x officially does not support MTP on macOS. Linux keeps working with jmtpfs in v0.0.x.
+
+- [ ] Pick a binding: `mtp` (high-level Rust wrapper, currently 0.7.x) vs `libmtp-sys` (raw FFI) vs hand-rolled bindgen
+- [ ] Implement the `Bridge` trait (list, read, write, delete, stat) on top of `LIBMTP_Get_Filemetadata` / `LIBMTP_Get_File_To_Handler` / `LIBMTP_Send_File_From_Handler`
+- [ ] Restore `depends_on "libmtp"` in the brew formula
+- [ ] Use the device `matcher` (serial / vendor_id / product_id) to pick a specific device via `LIBMTP_Get_Connected_Devices`
+- [ ] Drop the jmtpfs subprocess code path once parity is reached
+- [ ] Update docs + caveats: MTP works out of the box on macOS once libmtp is linked
 
 ### 2.4 `AdbBridge` (optional, override)
 - [ ] Wrap `adb push`, `adb pull`, `adb shell ls`, `adb shell stat`

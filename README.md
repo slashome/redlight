@@ -75,10 +75,13 @@ brew tap slashome/tap
 brew install redlight
 ```
 
-Phone-bridge prerequisites are not pulled in automatically — install only what you need:
+Phones on macOS use **ADB only** in v0.0.x — MTP (the default Android USB mode) requires the macFUSE kernel extension and a from-source `jmtpfs` build, which is too fragile to ship. The libmtp-direct rewrite that fixes this is planned for v0.1.0 (PLAN.md Phase 2.7). For now, on each Android phone you want to sync:
 
-- **MTP** (most Android phones in default USB mode): `brew install --cask macfuse`, then build [`jmtpfs`](https://github.com/dechamps/jmtpfs) from source (no homebrew formula on macOS).
-- **ADB** (Android phones in USB-debugging mode): `brew install --cask android-platform-tools`.
+1. Enable USB debugging (Settings → Developer options).
+2. `brew install --cask android-platform-tools`.
+3. Declare the device with `--bridge adb` (not `mtp`).
+
+External drives (`bridge = "fs"`) need no prerequisites.
 
 ### Linux
 
@@ -87,7 +90,10 @@ Phone-bridge prerequisites are not pulled in automatically — install only what
 cargo install --git https://github.com/slashome/redlight  # in the meantime
 ```
 
-Phone bridges on Linux use the distro package manager: `apt install jmtpfs adb`, `dnf install jmtpfs android-tools`, etc.
+Phone bridges on Linux use the distro package manager — both MTP and ADB work:
+
+- MTP: `apt install jmtpfs` (Debian/Ubuntu) or `dnf install jmtpfs` (Fedora/RHEL).
+- ADB: `apt install android-tools-adb` or equivalent.
 
 ### First-time setup
 
@@ -150,7 +156,7 @@ rl status
 - No Windows support (planned v2)
 - No fine-grained conflict resolution (most recent wins)
 - No direct drive ↔ drive sync in `rl sync` — transitivity through the host covers the standard case
-- No phone sync via `rl sync` — USB auto-detection in Phase 4; meanwhile: `cargo run --example mtp_probe` or `adb_probe`
+- No MTP support on macOS in v0.0.x — the `jmtpfs` + macFUSE path is too fragile to ship. Use ADB instead; the libmtp-direct rewrite that fixes this is planned for v0.1.0 (PLAN.md Phase 2.7). Linux already has MTP via `apt install jmtpfs`.
 
 ---
 
