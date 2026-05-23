@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
 
 use redlight::bridges::{AdbBridge, MtpBridge};
@@ -13,8 +13,26 @@ use redlight::daemon::{self, DaemonOpts};
 use redlight::sync::{SyncOpts, run_sync};
 use redlight::watcher::{AdbPollWatcher, MultiWatcher, PollWatcher};
 
+const BANNER: &str = "
+                       :-=+*#%@@@%#*+=-:
+                  .-=*%@@@@@@@@@@@@@@@@@%*=-.
+               .=#%@@@@@@@@@@@@@@@@@@@@@@@@@%#=.
+             =%@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%=
+       ─────────────────────────────────────────────────
+         ____   _____  ____    _      ___   ____  _   _  _____
+        |  _ \\ | ____||  _ \\  | |    |_ _| / ___|| | | ||_   _|
+        | |_) ||  _|  | | | | | |     | | | |  _ | |_| |  | |
+        |  _ < | |___ | |_| | | |___  | | | |_| ||  _  |  | |
+        |_| \\_\\|_____||____/  |_____|___| \\____||_| |_|  |_|
+";
+
 #[derive(Parser)]
-#[command(name = "rl", version, about = "Redlight — sync USB multi-devices.")]
+#[command(
+    name = "rl",
+    version,
+    about = "Redlight — sync USB multi-devices.",
+    before_help = BANNER
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -1493,7 +1511,10 @@ fn main() -> Result<()> {
             BindAction::List => cmd_bind_list()?,
             BindAction::Remove { item, device } => cmd_bind_remove(item, device)?,
         },
-        None => println!("rl {} — pass --help", redlight::VERSION),
+        None => {
+            Cli::command().print_help()?;
+            println!();
+        }
     }
     Ok(())
 }
