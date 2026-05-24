@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      # Lifted to job scope so the `if:` on the bump step can read it.
+      # Empty string when the secret hasn't been configured.
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Sanity test gate
+        run: cargo test --verbose
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "Redlight ${GITHUB_REF_NAME}" \
+            --generate-notes
+
+      # Cross-repo PR — needs a fine-grained PAT with `contents: write` on
+      # slashome/homebrew-tap, stored as the HOMEBREW_TAP_TOKEN secret on
+      # this repo. The step is skipped (not failed) if the secret is absent
+      # so a release still cuts even before the token is configured.
+      - name: Bump homebrew tap formula
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        uses: dawidd6/action-homebrew-bump-formula@v4
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          tap: slashome/homebrew-tap
+          formula: redlight
+          tag: ${{ github.ref_name }}

@@ -24,15 +24,9 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install Linux system deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libudev-dev libmtp-dev pkg-config
-
-      - name: Install macOS system deps
-        if: runner.os == 'macOS'
-        run: brew install libmtp
+      # No system deps yet — v0.0.x shells out to jmtpfs / adb, doesn't
+      # link libmtp directly. When the libmtp-direct bridge lands
+      # (PLAN.md Phase 2.7) reintroduce libmtp here.
 
       - uses: Swatinem/rust-cache@v2
 
