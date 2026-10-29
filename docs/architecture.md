@@ -74,3 +74,17 @@ On **Materia** (SSD, passive):
   ├── manifest.toml
   └── sync_log.toml
 ```
+
+## Manifest (`manifest.toml`, one per device)
+```toml
+version = 1
+device = "jarvis"
+
+[items.music.files."Beatles/Yesterday.mp3"]
+hash = "5d41402abc4b2a76b9719d911017c592"
+mtime = 1715000000
+size = 4231823
+last_sync = 1715000100
+```
+
+The other configuration files are described in [configuration.md](configuration.md).
