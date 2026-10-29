@@ -26,7 +26,7 @@ jobs:
 
       # No system deps yet — v0.0.x shells out to jmtpfs / adb, doesn't
       # link libmtp directly. When the libmtp-direct bridge lands
-      # (PLAN.md Phase 2.7) reintroduce libmtp here.
+      # reintroduce libmtp here.
 
       - uses: Swatinem/rust-cache@v2
 
